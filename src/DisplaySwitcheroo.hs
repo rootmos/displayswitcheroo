@@ -9,64 +9,116 @@ import Graphics.X11 ( openDisplay
 import Graphics.X11.Xrandr
 import qualified Graphics.X11.Types as X
 import qualified Graphics.X11.Xlib.Types as Xlib
-import Control.Monad ( liftM )
+import Control.Monad ( liftM
+                     , forM
+                     , forM_
+                     )
 import Data.Maybe ( catMaybes )
 import qualified Data.Map.Strict as M
-import Data.Bifunctor ( second )
+import Data.Bits ( testBit )
 
-data Output = Output { outputName :: String
+
+newtype OutputId = OutputId X.RROutput
+    deriving ( Show, Eq )
+
+data Output = Output { outputId :: OutputId
+                     , outputName :: String
                      , outputModes :: [Mode]
+                     , outputMonitor :: Maybe MonitorId
+                     , outputMonitors :: [MonitorId]
                      }
                      deriving Show
 
+isConnected :: Output -> Bool
+isConnected Output { outputModes = [] } = False
+isConnected _ = True
 
-data Monitor = Monitor { monitorX :: Int
+newtype MonitorId = MonitorId X.RRCrtc
+    deriving ( Show, Eq )
+
+data Monitor = Monitor { monitorId :: MonitorId
+                       , monitorX :: Int
                        , monitorY :: Int
                        , monitorWidth :: Int
                        , monitorHeight :: Int
                        , monitorMode :: Maybe Mode
+                       , monitorOutputs :: [OutputId]
                        }
                        deriving Show
 
-data Mode = Mode { modeWidth :: Int
+newtype ModeId = ModeId X.RRMode
+    deriving ( Show, Eq, Ord)
+
+data Mode = Mode { modeId :: ModeId
+                 , modeWidth :: Int
                  , modeHeight :: Int
+                 , modeHz :: Int
                  }
 
 instance Show Mode where
-    show Mode { modeWidth = w, modeHeight = h } = show w ++ "x" ++ show h
+    show Mode { modeWidth = w, modeHeight = h, modeHz = hz } =
+        show w ++ "x" ++ show h ++ "(" ++ show hz ++ "Hz)"
 
 
-modeMap :: XRRScreenResources -> M.Map X.RRMode Mode
+modeMap :: XRRScreenResources -> M.Map ModeId Mode
 modeMap XRRScreenResources { xrr_sr_modes = modes } =
     M.fromAscList $ map modeMaker modes
         where
-            modeMaker XRRModeInfo { xrr_mi_id = mid, xrr_mi_width = width, xrr_mi_height = height} =
-                (mid, Mode { modeWidth = (fromIntegral width), modeHeight = (fromIntegral height) })
+            modeMaker mi =
+                (ModeId (xrr_mi_id mi), Mode { modeId = ModeId (xrr_mi_id mi)
+                                             , modeWidth = fromIntegral $ xrr_mi_width mi
+                                             , modeHeight = fromIntegral $ xrr_mi_height mi
+                                             , modeHz = refreshRate mi
+                                             })
 
-connectedOutputs :: Xlib.Display -> XRRScreenResources -> IO (M.Map X.RROutput Output, M.Map X.RRCrtc Monitor)
-connectedOutputs display res = do
-    outputInfos <- liftM catMaybes $ mapM (\oid -> (fmap ((,) oid)) <$> xrrGetOutputInfo display res oid) (xrr_sr_outputs res)
-    let outputs = M.fromAscList . map (second outputMaker) . filter (isConnected . snd) $ outputInfos
+refreshRate :: XRRModeInfo -> Int
+refreshRate mi = round $ (dotClock / (hTotal * vTotal) :: Double)
+    where
+        dotClock = fromIntegral $ xrr_mi_dotClock mi
+        hTotal = fromIntegral $ xrr_mi_hTotal mi
+        vTotal
+          | doubleScanActive && not interlaceActive = 2 * (fromIntegral $ xrr_mi_vTotal mi)
+          | not doubleScanActive && interlaceActive = (fromIntegral $ xrr_mi_vTotal mi) / 2
+          | otherwise = fromIntegral $ xrr_mi_vTotal mi
+        doubleScanActive = testBit (xrr_mi_modeFlags mi) 5
+        interlaceActive = testBit (xrr_mi_modeFlags mi) 4
 
-    crtcInfos <- liftM catMaybes $ mapM (\cid -> (fmap ((,) cid)) <$> xrrGetCrtcInfo display res cid) (xrr_sr_crtcs res)
-    let monitors = M.fromAscList . map (second monitorMaker) $ crtcInfos
+monitorsAndOutputs :: Xlib.Display -> XRRScreenResources -> IO (M.Map OutputId Output, M.Map MonitorId Monitor)
+monitorsAndOutputs display res = do
+    rawOutputs <- rawOutputsM
+    let outputs = M.mapWithKey outputMaker rawOutputs
+
+    rawMonitors <- rawMonitorsM
+    let monitors = M.mapWithKey monitorMaker rawMonitors
 
     return (outputs, monitors)
         where
-            isConnected XRROutputInfo { xrr_oi_connection = 0 } = True
-            isConnected _ = False
+            rawOutputsM = liftM (M.fromAscList . catMaybes) $ forM (xrr_sr_outputs res) (\oid -> do
+                maybeOi <- xrrGetOutputInfo display res oid
+                return $ ((,) (OutputId oid)) <$> maybeOi)
 
-            outputMaker XRROutputInfo { xrr_oi_name = name, xrr_oi_modes = modes } =
-                Output { outputName = name
-                       , outputModes = catMaybes $ map (\m -> M.lookup m (modeMap res)) modes
+            rawMonitorsM = liftM (M.fromAscList . catMaybes) $ forM (xrr_sr_crtcs res) (\cid -> do
+                maybeCi <- xrrGetCrtcInfo display res cid
+                return $ ((,) (MonitorId cid)) <$> maybeCi)
+
+            outputMaker oid oi =
+                Output { outputId = oid
+                       , outputName = (xrr_oi_name oi)
+                       , outputModes = catMaybes $ map (\m -> M.lookup (ModeId m) (modeMap res)) (xrr_oi_modes oi)
+                       , outputMonitor = case (fromIntegral $ xrr_oi_crtc oi) of
+                                           0 -> Nothing
+                                           i -> Just (MonitorId i)
+                       , outputMonitors = map (MonitorId . fromIntegral) (xrr_oi_crtcs oi)
                        }
 
-            monitorMaker ci =
-                Monitor { monitorX = (fromIntegral $ xrr_ci_x ci)
+            monitorMaker mid ci =
+                Monitor { monitorId = mid
+                        , monitorX = (fromIntegral $ xrr_ci_x ci)
                         , monitorY = (fromIntegral $ xrr_ci_y ci)
                         , monitorWidth = (fromIntegral $ xrr_ci_width ci)
                         , monitorHeight = (fromIntegral $ xrr_ci_height ci)
-                        , monitorMode = M.lookup (xrr_ci_mode ci) (modeMap res)
+                        , monitorMode = M.lookup (ModeId $ xrr_ci_mode ci) (modeMap res)
+                        , monitorOutputs = map (OutputId . fromIntegral) (xrr_ci_outputs ci)
                         }
 
 
@@ -75,6 +127,7 @@ doSwitcheroo = do
     display <- openDisplay ""
     root <- rootWindow display (defaultScreen display)
     Just res <- xrrGetScreenResourcesCurrent display root
-    outputs <- connectedOutputs display res
-    putStrLn . show $ outputs
+    (outputs, monitors) <- monitorsAndOutputs display res
+    forM_ outputs $ putStrLn . show
+    forM_ monitors $ putStrLn . show
 
