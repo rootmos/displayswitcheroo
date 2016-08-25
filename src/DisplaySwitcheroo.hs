@@ -6,6 +6,7 @@ import Graphics.X11 ( openDisplay
                     , rootWindow
                     , defaultScreen
                     )
+import Graphics.X11.Xlib.Extras ( currentTime, none )
 import Graphics.X11.Xrandr
 import qualified Graphics.X11.Types as X
 import qualified Graphics.X11.Xlib.Types as Xlib
@@ -34,7 +35,7 @@ isConnected Output { outputModes = [] } = False
 isConnected _ = True
 
 newtype MonitorId = MonitorId X.RRCrtc
-    deriving ( Show, Eq )
+    deriving ( Show, Eq, Ord )
 
 data Monitor = Monitor { monitorId :: MonitorId
                        , monitorX :: Int
@@ -121,6 +122,20 @@ monitorsAndOutputs display res = do
                         , monitorOutputs = map (OutputId . fromIntegral) (xrr_ci_outputs ci)
                         }
 
+updateMonitor :: Xlib.Display -> XRRScreenResources -> Monitor -> IO X.Status
+updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid, monitorMode = Nothing }) =
+    xrrSetCrtcConfig display res cid currentTime 0 0 none X.xRR_Rotate_0 []
+
+updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
+                                             , monitorMode = Just (Mode { modeId = ModeId mid })
+                                             }) = do
+    Just prevConfig <- xrrGetCrtcInfo display res cid
+    let x = fromIntegral $ monitorX monitor
+        y = fromIntegral $ monitorY monitor
+        rot = xrr_ci_rotations prevConfig
+        outputs = map (\(OutputId i) -> i) $ monitorOutputs monitor
+
+    xrrSetCrtcConfig display res cid currentTime x y mid rot outputs
 
 doSwitcheroo :: IO ()
 doSwitcheroo = do
@@ -130,4 +145,8 @@ doSwitcheroo = do
     (outputs, monitors) <- monitorsAndOutputs display res
     forM_ outputs $ putStrLn . show
     forM_ monitors $ putStrLn . show
+
+    let Just m = M.lookup (MonitorId 97) monitors
+        newSettings = m { monitorMode = Nothing }
+    updateMonitor display res newSettings >>= putStrLn . show
 
