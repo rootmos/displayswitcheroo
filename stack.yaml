@@ -8,7 +8,7 @@ packages:
   - '.'
   - location:
       git: git@github.com:rootmos/X11.git
-      commit: bac8f53187dbc5b6d23990816c450512f0e4694b
+      commit: 5f8c0969ed3d80e8e933a9fe4a7d71a63877b9c2
 
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps: []
