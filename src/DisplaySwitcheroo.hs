@@ -6,6 +6,7 @@ import Graphics.X11 ( openDisplay
                     , rootWindow
                     , defaultScreen
                     )
+import Graphics.X11.Xlib.Extras ( currentTime, none )
 import Graphics.X11.Xrandr
 import qualified Graphics.X11.Types as X
 import qualified Graphics.X11.Xlib.Types as Xlib
@@ -13,28 +14,41 @@ import Control.Monad ( liftM
                      , forM
                      , forM_
                      )
-import Data.Maybe ( catMaybes )
+import Data.Maybe ( catMaybes
+                  , listToMaybe
+                  )
+import Data.List ( unzip4
+                 , find
+                 )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
+import Control.Monad.State.Strict
 
 
 newtype OutputId = OutputId X.RROutput
-    deriving ( Show, Eq )
+    deriving ( Show, Eq, Ord )
 
 data Output = Output { outputId :: OutputId
                      , outputName :: String
                      , outputModes :: [Mode]
                      , outputMonitor :: Maybe MonitorId
                      , outputMonitors :: [MonitorId]
+                     , outputWidthInMillimeters :: Int
+                     , outputHeightInMillimeters :: Int
                      }
                      deriving Show
 
-isConnected :: Output -> Bool
-isConnected Output { outputModes = [] } = False
-isConnected _ = True
+isOutputConnected :: Output -> Bool
+isOutputConnected Output { outputModes = [] } = False
+isOutputConnected _ = True
+
+preferredMode :: Output -> Maybe Mode
+preferredMode Output { outputModes = [] } = Nothing
+preferredMode Output { outputModes = modes } = Just $ maximum modes
+
 
 newtype MonitorId = MonitorId X.RRCrtc
-    deriving ( Show, Eq )
+    deriving ( Show, Eq, Ord )
 
 data Monitor = Monitor { monitorId :: MonitorId
                        , monitorX :: Int
@@ -46,6 +60,10 @@ data Monitor = Monitor { monitorId :: MonitorId
                        }
                        deriving Show
 
+isMonitorEnabled :: Monitor -> Bool
+isMonitorEnabled Monitor { monitorMode = Nothing } = False
+isMonitorEnabled _ = True
+
 newtype ModeId = ModeId X.RRMode
     deriving ( Show, Eq, Ord)
 
@@ -54,10 +72,16 @@ data Mode = Mode { modeId :: ModeId
                  , modeHeight :: Int
                  , modeHz :: Int
                  }
+                 deriving ( Eq )
+
+instance Ord Mode where
+    x `compare` y = (toTuple x) `compare` (toTuple y)
+        where toTuple m = (modeWidth m, modeHeight m, modeHz m)
 
 instance Show Mode where
     show Mode { modeWidth = w, modeHeight = h, modeHz = hz } =
         show w ++ "x" ++ show h ++ "(" ++ show hz ++ "Hz)"
+
 
 
 modeMap :: XRRScreenResources -> M.Map ModeId Mode
@@ -83,15 +107,20 @@ refreshRate mi = round $ (dotClock / (hTotal * vTotal) :: Double)
         doubleScanActive = testBit (xrr_mi_modeFlags mi) 5
         interlaceActive = testBit (xrr_mi_modeFlags mi) 4
 
-monitorsAndOutputs :: Xlib.Display -> XRRScreenResources -> IO (M.Map OutputId Output, M.Map MonitorId Monitor)
-monitorsAndOutputs display res = do
+data Setup = Setup { setupOutputs :: M.Map OutputId Output
+                   , setupMonitors :: M.Map MonitorId Monitor
+                   }
+                   deriving Show
+
+fetchSetup :: Xlib.Display -> XRRScreenResources -> IO Setup
+fetchSetup display res = do
     rawOutputs <- rawOutputsM
     let outputs = M.mapWithKey outputMaker rawOutputs
 
     rawMonitors <- rawMonitorsM
     let monitors = M.mapWithKey monitorMaker rawMonitors
 
-    return (outputs, monitors)
+    return $ Setup { setupOutputs = outputs, setupMonitors = monitors }
         where
             rawOutputsM = liftM (M.fromAscList . catMaybes) $ forM (xrr_sr_outputs res) (\oid -> do
                 maybeOi <- xrrGetOutputInfo display res oid
@@ -109,6 +138,8 @@ monitorsAndOutputs display res = do
                                            0 -> Nothing
                                            i -> Just (MonitorId i)
                        , outputMonitors = map (MonitorId . fromIntegral) (xrr_oi_crtcs oi)
+                       , outputWidthInMillimeters = fromIntegral $ xrr_oi_mm_width oi
+                       , outputHeightInMillimeters = fromIntegral $ xrr_oi_mm_height oi
                        }
 
             monitorMaker mid ci =
@@ -121,13 +152,97 @@ monitorsAndOutputs display res = do
                         , monitorOutputs = map (OutputId . fromIntegral) (xrr_ci_outputs ci)
                         }
 
+updateMonitor :: Xlib.Display -> XRRScreenResources -> Monitor -> IO X.Status
+updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid, monitorMode = Nothing }) =
+    xrrSetCrtcConfig display res cid currentTime 0 0 none X.xRR_Rotate_0 []
+
+updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
+                                             , monitorMode = Just (Mode { modeId = ModeId mid })
+                                             }) = do
+    Just prevConfig <- xrrGetCrtcInfo display res cid
+    let x = fromIntegral $ monitorX monitor
+        y = fromIntegral $ monitorY monitor
+        rot = xrr_ci_rotations prevConfig
+        outputs = map (\(OutputId i) -> i) $ monitorOutputs monitor
+
+    xrrSetCrtcConfig display res cid currentTime x y mid X.xRR_Rotate_0 outputs
+
+updateScreen :: Xlib.Display -> X.Window -> (Int, Int, Int, Int) -> IO ()
+updateScreen display root (width, height, widthInMillimeters, heightInMillimeters) =
+    xrrSetScreenSize display root (fromIntegral width) (fromIntegral height) (fromIntegral widthInMillimeters) (fromIntegral heightInMillimeters)
+
+calculateScreenDimensions :: Setup -> (Int, Int, Int, Int)
+calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monitors } =
+    (maxX, maxY, maxXmm, maxYmm)
+    where
+        maxX = maximum maxXs
+        maxY = maximum maxYs
+        maxXmm = round $ (fromIntegral maxX) / denX
+        maxYmm = round $ (fromIntegral maxY) / denY
+        denX = maximum denXs
+        denY = maximum denYs
+        (maxXs, maxYs, denXs, denYs) = unzip4 . catMaybes $ map considerOutput (M.elems outputs)
+        considerOutput :: Output -> Maybe (Int, Int, Float, Float)
+        considerOutput output = do
+            mid <- outputMonitor output
+            monitor <- M.lookup mid monitors
+            let mX = monitorX monitor + monitorWidth monitor
+                mY = monitorY monitor + monitorHeight monitor
+                dX = (fromIntegral $ monitorWidth monitor) / (fromIntegral $ outputWidthInMillimeters output)
+                dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
+            return (mX, mY, dX, dY)
+
+rightOfMonitor :: Monad m => Output -> Monitor -> StateT Setup m (Maybe Monitor)
+output `rightOfMonitor` existingMonitor = do
+    Setup { setupMonitors = monitors } <- get
+    let maybeMonitor = do
+            disabledMonitor <- listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
+                map (flip M.lookup $ monitors) (outputMonitors output)
+            mode <- preferredMode output
+            return disabledMonitor { monitorMode = Just mode
+                                   , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
+                                   , monitorY = monitorY existingMonitor
+                                   , monitorWidth = modeWidth mode
+                                   , monitorHeight = modeHeight mode
+                                   , monitorOutputs = [outputId output]
+                                   }
+    case maybeMonitor of
+      Just monitor -> do
+          modify $ \setup -> setup { setupMonitors = M.insert (monitorId monitor) monitor (setupMonitors setup)
+                                   , setupOutputs = M.insert (outputId output) (output { outputMonitor = Just (monitorId monitor) }) (setupOutputs setup)
+                                   }
+          return (Just monitor)
+      Nothing -> return Nothing
+
+rightOf :: Monad m => Output -> Output -> StateT Setup m (Maybe Monitor)
+output `rightOf` existingOutput = get >>= \setup -> do
+    case outputMonitor existingOutput >>= flip lookupMonitor setup of
+      Just existingMonitor -> output `rightOfMonitor` existingMonitor
+      Nothing -> return Nothing
+
+findOutput :: String -> Setup -> Maybe Output
+findOutput name = find ((== name) . outputName) . setupOutputs
+
+lookupMonitor :: MonitorId -> Setup -> Maybe Monitor
+lookupMonitor mid = M.lookup mid . setupMonitors
+
+lookupOutput :: OutputId -> Setup -> Maybe Output
+lookupOutput oid = M.lookup oid . setupOutputs
 
 doSwitcheroo :: IO ()
 doSwitcheroo = do
     display <- openDisplay ""
     root <- rootWindow display (defaultScreen display)
     Just res <- xrrGetScreenResourcesCurrent display root
-    (outputs, monitors) <- monitorsAndOutputs display res
-    forM_ outputs $ putStrLn . show
-    forM_ monitors $ putStrLn . show
+    initialSetup <- fetchSetup display res
+
+    (flip evalStateT) initialSetup $ do
+        Just a <- gets $ findOutput "DVI-D-1"
+        Just b <- gets $ findOutput "DVI-I-1"
+        Just m <- a `rightOf` b
+        dim <- gets calculateScreenDimensions
+        lift $ do
+            updateScreen display root dim
+            0 <- updateMonitor display res m
+            return ()
 
