@@ -2,6 +2,8 @@ module DisplaySwitcheroo
     ( doSwitcheroo
     ) where
 
+import DisplaySwitcheroo.Config
+
 import Graphics.X11 ( openDisplay
                     , rootWindow
                     , defaultScreen
@@ -19,10 +21,14 @@ import Data.Maybe ( catMaybes
                   )
 import Data.List ( unzip4
                  , find
+                 , intersect
+                 , (\\)
+                 , partition
                  )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Control.Monad.State.Strict
+import Data.Bifunctor ( bimap )
 
 
 newtype OutputId = OutputId X.RROutput
@@ -41,6 +47,10 @@ data Output = Output { outputId :: OutputId
 isOutputConnected :: Output -> Bool
 isOutputConnected Output { outputModes = [] } = False
 isOutputConnected _ = True
+
+isOutputEnabled :: Output -> Bool
+isOutputEnabled Output { outputMonitor = Nothing } = False
+isOutputEnabled _ = True
 
 preferredMode :: Output -> Maybe Mode
 preferredMode Output { outputModes = [] } = Nothing
@@ -229,20 +239,32 @@ lookupMonitor mid = M.lookup mid . setupMonitors
 lookupOutput :: OutputId -> Setup -> Maybe Output
 lookupOutput oid = M.lookup oid . setupOutputs
 
+
+data SetupDifference = SetupDifference { setupDifferenceEnable :: [OutputId]
+                                       , setupDifferenceDisable :: [OutputId]
+                                       } deriving Show
+
+compareDesiredSetup :: Setup -> DesiredSetup -> Either String SetupDifference
+compareDesiredSetup setup desired = do
+    requiredOutputs <- requiredOutputsE
+    return $ SetupDifference { setupDifferenceEnable = requiredOutputs `intersect` disabledOutputs
+                             , setupDifferenceDisable = (allOutputIds \\ requiredOutputs) `intersect` enabledOutputs
+                             }
+        where requiredOutputsE = sequence $ map requireOutput (desiredSetupOutputs desired)
+              requireOutput name = outputId <$> maybe (notConnectedReason name) Right (findConnectedOutput name)
+              notConnectedReason name = (Left $ "not applicable: output " ++ name ++ " not connected")
+              findConnectedOutput name = mfilter isOutputConnected $ findOutput name setup
+              allOutputs = M.elems $ setupOutputs setup
+              allOutputIds = map outputId allOutputs
+              (enabledOutputs, disabledOutputs) = bimap (map outputId) (map outputId) $ partition isOutputEnabled allOutputs
+
 doSwitcheroo :: IO ()
 doSwitcheroo = do
+    Right config <- loadConfig "example.json"
+
     display <- openDisplay ""
     root <- rootWindow display (defaultScreen display)
     Just res <- xrrGetScreenResourcesCurrent display root
     initialSetup <- fetchSetup display res
 
-    (flip evalStateT) initialSetup $ do
-        Just a <- gets $ findOutput "DVI-D-1"
-        Just b <- gets $ findOutput "DVI-I-1"
-        Just m <- a `rightOf` b
-        dim <- gets calculateScreenDimensions
-        lift $ do
-            updateScreen display root dim
-            0 <- updateMonitor display res m
-            return ()
-
+    putStrLn . show $ map (compareDesiredSetup initialSetup) (configDesiredSetups config)

@@ -1,0 +1,9 @@
+{
+    "setups" : [
+        { "outputs": ["DP-1"] },
+        { "outputs": ["DVI-I-1", "DP-1", "DVI-D-1"] },
+        { "outputs": ["DVI-I-1", "DVI-D-1"] },
+        { "outputs": ["DVI-I-1"], "name": "Only left monitor" }
+    ]
+}
+
