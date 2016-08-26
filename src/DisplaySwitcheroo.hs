@@ -15,8 +15,10 @@ import Control.Monad ( liftM
                      , forM_
                      )
 import Data.Maybe ( catMaybes )
+import Data.List ( unzip4 )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
+import Data.Bifunctor ( bimap )
 
 
 newtype OutputId = OutputId X.RROutput
@@ -27,12 +29,14 @@ data Output = Output { outputId :: OutputId
                      , outputModes :: [Mode]
                      , outputMonitor :: Maybe MonitorId
                      , outputMonitors :: [MonitorId]
+                     , outputWidthInMillimeters :: Int
+                     , outputHeightInMillimeters :: Int
                      }
                      deriving Show
 
-isConnected :: Output -> Bool
-isConnected Output { outputModes = [] } = False
-isConnected _ = True
+isOutputConnected :: Output -> Bool
+isOutputConnected Output { outputModes = [] } = False
+isOutputConnected _ = True
 
 newtype MonitorId = MonitorId X.RRCrtc
     deriving ( Show, Eq, Ord )
@@ -46,6 +50,10 @@ data Monitor = Monitor { monitorId :: MonitorId
                        , monitorOutputs :: [OutputId]
                        }
                        deriving Show
+
+isMonitorEnabled :: Monitor -> Bool
+isMonitorEnabled Monitor { monitorMode = Nothing } = False
+isMonitorEnabled _ = True
 
 newtype ModeId = ModeId X.RRMode
     deriving ( Show, Eq, Ord)
@@ -110,6 +118,8 @@ monitorsAndOutputs display res = do
                                            0 -> Nothing
                                            i -> Just (MonitorId i)
                        , outputMonitors = map (MonitorId . fromIntegral) (xrr_oi_crtcs oi)
+                       , outputWidthInMillimeters = fromIntegral $ xrr_oi_mm_width oi
+                       , outputHeightInMillimeters = fromIntegral $ xrr_oi_mm_height oi
                        }
 
             monitorMaker mid ci =
@@ -137,6 +147,26 @@ updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
 
     xrrSetCrtcConfig display res cid currentTime x y mid rot outputs
 
+calculateScreenDimensions :: [Output] -> M.Map MonitorId Monitor -> (Int, Int, Int, Int)
+calculateScreenDimensions outputs monitors = (maxX, maxY, maxXmm, maxYmm)
+    where
+        maxX = maximum maxXs
+        maxY = maximum maxYs
+        maxXmm = round $ (fromIntegral maxX) / denX
+        maxYmm = round $ (fromIntegral maxY) / denY
+        denX = maximum denXs
+        denY = maximum denYs
+        (maxXs, maxYs, denXs, denYs) = unzip4 . catMaybes $ map considerOutput outputs
+        considerOutput :: Output -> Maybe (Int, Int, Float, Float)
+        considerOutput output = do
+            mid <- outputMonitor output
+            monitor <- M.lookup mid monitors
+            let mX = monitorX monitor + monitorWidth monitor
+                mY = monitorY monitor + monitorHeight monitor
+                dX = (fromIntegral $ monitorWidth monitor) / (fromIntegral $ outputWidthInMillimeters output)
+                dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
+            return (mX, mY, dX, dY)
+
 doSwitcheroo :: IO ()
 doSwitcheroo = do
     display <- openDisplay ""
@@ -146,7 +176,4 @@ doSwitcheroo = do
     forM_ outputs $ putStrLn . show
     forM_ monitors $ putStrLn . show
 
-    let Just m = M.lookup (MonitorId 97) monitors
-        newSettings = m { monitorMode = Nothing }
-    updateMonitor display res newSettings >>= putStrLn . show
-
+    putStrLn . show $ calculateScreenDimensions (M.elems outputs) monitors
