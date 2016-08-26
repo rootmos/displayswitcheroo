@@ -19,6 +19,7 @@ import Data.List ( unzip4 )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Data.Bifunctor ( bimap )
+import Control.Monad.Reader
 
 
 newtype OutputId = OutputId X.RROutput
@@ -92,15 +93,20 @@ refreshRate mi = round $ (dotClock / (hTotal * vTotal) :: Double)
         doubleScanActive = testBit (xrr_mi_modeFlags mi) 5
         interlaceActive = testBit (xrr_mi_modeFlags mi) 4
 
-monitorsAndOutputs :: Xlib.Display -> XRRScreenResources -> IO (M.Map OutputId Output, M.Map MonitorId Monitor)
-monitorsAndOutputs display res = do
+data Setup = Setup { setupOutputs :: M.Map OutputId Output
+                   , setupMonitors :: M.Map MonitorId Monitor
+                   }
+                   deriving Show
+
+fetchSetup :: Xlib.Display -> XRRScreenResources -> IO Setup
+fetchSetup display res = do
     rawOutputs <- rawOutputsM
     let outputs = M.mapWithKey outputMaker rawOutputs
 
     rawMonitors <- rawMonitorsM
     let monitors = M.mapWithKey monitorMaker rawMonitors
 
-    return (outputs, monitors)
+    return $ Setup { setupOutputs = outputs, setupMonitors = monitors }
         where
             rawOutputsM = liftM (M.fromAscList . catMaybes) $ forM (xrr_sr_outputs res) (\oid -> do
                 maybeOi <- xrrGetOutputInfo display res oid
@@ -147,16 +153,16 @@ updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
 
     xrrSetCrtcConfig display res cid currentTime x y mid rot outputs
 
-calculateScreenDimensions :: [Output] -> M.Map MonitorId Monitor -> (Int, Int, Int, Int)
-calculateScreenDimensions outputs monitors = (maxX, maxY, maxXmm, maxYmm)
-    where
-        maxX = maximum maxXs
+calculateScreenDimensions :: Monad m => ReaderT Setup m (Int, Int, Int, Int)
+calculateScreenDimensions = do
+    Setup { setupOutputs = outputs, setupMonitors = monitors } <- ask
+    let maxX = maximum maxXs
         maxY = maximum maxYs
         maxXmm = round $ (fromIntegral maxX) / denX
         maxYmm = round $ (fromIntegral maxY) / denY
         denX = maximum denXs
         denY = maximum denYs
-        (maxXs, maxYs, denXs, denYs) = unzip4 . catMaybes $ map considerOutput outputs
+        (maxXs, maxYs, denXs, denYs) = unzip4 . catMaybes $ map considerOutput (M.elems outputs)
         considerOutput :: Output -> Maybe (Int, Int, Float, Float)
         considerOutput output = do
             mid <- outputMonitor output
@@ -166,14 +172,17 @@ calculateScreenDimensions outputs monitors = (maxX, maxY, maxXmm, maxYmm)
                 dX = (fromIntegral $ monitorWidth monitor) / (fromIntegral $ outputWidthInMillimeters output)
                 dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
             return (mX, mY, dX, dY)
+    return (maxX, maxY, maxXmm, maxYmm)
+
+rightOf :: Output -> Monitor -> ReaderT Setup m (Maybe Monitor)
+a `rightOf` b = undefined
 
 doSwitcheroo :: IO ()
 doSwitcheroo = do
     display <- openDisplay ""
     root <- rootWindow display (defaultScreen display)
     Just res <- xrrGetScreenResourcesCurrent display root
-    (outputs, monitors) <- monitorsAndOutputs display res
-    forM_ outputs $ putStrLn . show
-    forM_ monitors $ putStrLn . show
+    setup <- fetchSetup display res
+    putStrLn . show $ setup
 
-    putStrLn . show $ calculateScreenDimensions (M.elems outputs) monitors
+    putStrLn . show $ runReader calculateScreenDimensions setup
