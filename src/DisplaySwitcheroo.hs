@@ -192,8 +192,8 @@ calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monito
                 dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
             return (mX, mY, dX, dY)
 
-rightOf :: Monad m => Output -> Monitor -> StateT Setup m (Maybe Monitor)
-output `rightOf` existingMonitor = do
+rightOfMonitor :: Monad m => Output -> Monitor -> StateT Setup m (Maybe Monitor)
+output `rightOfMonitor` existingMonitor = do
     Setup { setupMonitors = monitors } <- get
     let maybeMonitor = do
             disabledMonitor <- listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
@@ -214,6 +214,12 @@ output `rightOf` existingMonitor = do
           return (Just monitor)
       Nothing -> return Nothing
 
+rightOf :: Monad m => Output -> Output -> StateT Setup m (Maybe Monitor)
+output `rightOf` existingOutput = get >>= \setup -> do
+    case outputMonitor existingOutput >>= flip lookupMonitor setup of
+      Just existingMonitor -> output `rightOfMonitor` existingMonitor
+      Nothing -> return Nothing
+
 findOutput :: String -> Setup -> Maybe Output
 findOutput name = find ((== name) . outputName) . setupOutputs
 
@@ -232,8 +238,7 @@ doSwitcheroo = do
 
     (flip evalStateT) initialSetup $ do
         Just a <- gets $ findOutput "DVI-D-1"
-        Just mid <- gets $ findOutput "DVI-I-1" >=> outputMonitor
-        Just b <- gets $ lookupMonitor mid
+        Just b <- gets $ findOutput "DVI-I-1"
         Just m <- a `rightOf` b
         dim <- gets calculateScreenDimensions
         lift $ do
