@@ -24,6 +24,7 @@ import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Data.Bifunctor ( bimap )
 import Control.Monad.Reader
+import Control.Monad.State.Strict
 
 
 newtype OutputId = OutputId X.RROutput
@@ -168,10 +169,11 @@ updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
 
     xrrSetCrtcConfig display res cid currentTime x y mid rot outputs
 
-calculateScreenDimensions :: Monad m => ReaderT Setup m (Int, Int, Int, Int)
-calculateScreenDimensions = do
-    Setup { setupOutputs = outputs, setupMonitors = monitors } <- ask
-    let maxX = maximum maxXs
+calculateScreenDimensions :: Setup -> (Int, Int, Int, Int)
+calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monitors } =
+    (maxX, maxY, maxXmm, maxYmm)
+    where
+        maxX = maximum maxXs
         maxY = maximum maxYs
         maxXmm = round $ (fromIntegral maxX) / denX
         maxYmm = round $ (fromIntegral maxY) / denY
@@ -187,31 +189,37 @@ calculateScreenDimensions = do
                 dX = (fromIntegral $ monitorWidth monitor) / (fromIntegral $ outputWidthInMillimeters output)
                 dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
             return (mX, mY, dX, dY)
-    return (maxX, maxY, maxXmm, maxYmm)
 
-rightOf :: Monad m => Output -> Monitor -> ReaderT Setup m (Maybe Monitor)
+rightOf :: Monad m => Output -> Monitor -> StateT Setup m (Maybe Monitor)
 output `rightOf` existingMonitor = do
-    Setup { setupMonitors = monitors } <- ask
-    return $ do
-        disabledMonitor <- listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
-            map (flip M.lookup $ monitors) (outputMonitors output)
-        mode <- preferredMode output
-        return disabledMonitor { monitorMode = Just mode
-                               , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
-                               , monitorY = monitorY existingMonitor
-                               , monitorWidth = modeWidth mode
-                               , monitorHeight = modeHeight mode
-                               , monitorOutputs = [outputId output]
-                               }
+    Setup { setupMonitors = monitors } <- get
+    let maybeMonitor = do
+            disabledMonitor <- listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
+                map (flip M.lookup $ monitors) (outputMonitors output)
+            mode <- preferredMode output
+            return disabledMonitor { monitorMode = Just mode
+                                   , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
+                                   , monitorY = monitorY existingMonitor
+                                   , monitorWidth = modeWidth mode
+                                   , monitorHeight = modeHeight mode
+                                   , monitorOutputs = [outputId output]
+                                   }
+    case maybeMonitor of
+      Just monitor -> do
+          modify $ \setup -> setup { setupMonitors = M.insert (monitorId monitor) monitor (setupMonitors setup)
+                                   , setupOutputs = M.insert (outputId output) (output { outputMonitor = Just (monitorId monitor) }) (setupOutputs setup)
+                                   }
+          return (Just monitor)
+      Nothing -> return Nothing
 
-findOutput :: Monad m => String -> ReaderT Setup m (Maybe Output)
-findOutput name = (find ((==) name . outputName) . setupOutputs) <$> ask
+findOutput :: String -> Setup -> Maybe Output
+findOutput name = find ((==) name . outputName) . setupOutputs
 
-lookupMonitor :: Monad m => MonitorId -> ReaderT Setup m (Maybe Monitor)
-lookupMonitor mid = (liftM setupMonitors ask) >>= return . M.lookup mid
+lookupMonitor :: MonitorId -> Setup -> Maybe Monitor
+lookupMonitor mid = M.lookup mid . setupMonitors
 
-lookupOutput :: Monad m => OutputId -> ReaderT Setup m (Maybe Output)
-lookupOutput oid = (liftM setupOutputs ask) >>= return . M.lookup oid
+lookupOutput :: OutputId -> Setup -> Maybe Output
+lookupOutput oid = M.lookup oid . setupOutputs
 
 doSwitcheroo :: IO ()
 doSwitcheroo = do
@@ -219,16 +227,11 @@ doSwitcheroo = do
     root <- rootWindow display (defaultScreen display)
     Just res <- xrrGetScreenResourcesCurrent display root
     setup <- fetchSetup display res
-    putStrLn . show $ setup
 
-    putStrLn . show $ runReader calculateScreenDimensions setup
-    let Just enabledMonitor = (flip runReader) setup $ do
-            Just a <- findOutput "DVI-D-1"
-            Just mid <- liftM (>>= outputMonitor) $ findOutput "DVI-I-1"
-            Just b <- lookupMonitor mid
-            a `rightOf` b
-    putStrLn . show $ enabledMonitor
-
-    updateMonitor display res enabledMonitor >>= (putStrLn . show)
-
-
+    (flip evalStateT) setup $ do
+        Just a <- gets $ findOutput "DVI-D-1"
+        Just mid <- gets $ findOutput "DVI-I-1" >=> outputMonitor
+        Just b <- gets $ lookupMonitor mid
+        m <- a `rightOf` b
+        dim <- gets calculateScreenDimensions
+        lift . putStrLn . show $ dim
