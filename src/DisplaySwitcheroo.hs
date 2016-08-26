@@ -14,8 +14,12 @@ import Control.Monad ( liftM
                      , forM
                      , forM_
                      )
-import Data.Maybe ( catMaybes )
-import Data.List ( unzip4 )
+import Data.Maybe ( catMaybes
+                  , listToMaybe
+                  )
+import Data.List ( unzip4
+                 , find
+                 )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Data.Bifunctor ( bimap )
@@ -23,7 +27,7 @@ import Control.Monad.Reader
 
 
 newtype OutputId = OutputId X.RROutput
-    deriving ( Show, Eq )
+    deriving ( Show, Eq, Ord )
 
 data Output = Output { outputId :: OutputId
                      , outputName :: String
@@ -38,6 +42,11 @@ data Output = Output { outputId :: OutputId
 isOutputConnected :: Output -> Bool
 isOutputConnected Output { outputModes = [] } = False
 isOutputConnected _ = True
+
+preferredMode :: Output -> Maybe Mode
+preferredMode Output { outputModes = [] } = Nothing
+preferredMode Output { outputModes = modes } = Just $ maximum modes
+
 
 newtype MonitorId = MonitorId X.RRCrtc
     deriving ( Show, Eq, Ord )
@@ -64,10 +73,16 @@ data Mode = Mode { modeId :: ModeId
                  , modeHeight :: Int
                  , modeHz :: Int
                  }
+                 deriving ( Eq )
+
+instance Ord Mode where
+    x `compare` y = (toTuple x) `compare` (toTuple y)
+        where toTuple m = (modeWidth m, modeHeight m, modeHz m)
 
 instance Show Mode where
     show Mode { modeWidth = w, modeHeight = h, modeHz = hz } =
         show w ++ "x" ++ show h ++ "(" ++ show hz ++ "Hz)"
+
 
 
 modeMap :: XRRScreenResources -> M.Map ModeId Mode
@@ -174,8 +189,29 @@ calculateScreenDimensions = do
             return (mX, mY, dX, dY)
     return (maxX, maxY, maxXmm, maxYmm)
 
-rightOf :: Output -> Monitor -> ReaderT Setup m (Maybe Monitor)
-a `rightOf` b = undefined
+rightOf :: Monad m => Output -> Monitor -> ReaderT Setup m (Maybe Monitor)
+output `rightOf` existingMonitor = do
+    Setup { setupMonitors = monitors } <- ask
+    return $ do
+        disabledMonitor <- listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
+            map (flip M.lookup $ monitors) (outputMonitors output)
+        mode <- preferredMode output
+        return disabledMonitor { monitorMode = Just mode
+                               , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
+                               , monitorY = monitorY existingMonitor
+                               , monitorWidth = modeWidth mode
+                               , monitorHeight = modeHeight mode
+                               , monitorOutputs = [outputId output]
+                               }
+
+findOutput :: Monad m => String -> ReaderT Setup m (Maybe Output)
+findOutput name = (find ((==) name . outputName) . setupOutputs) <$> ask
+
+lookupMonitor :: Monad m => MonitorId -> ReaderT Setup m (Maybe Monitor)
+lookupMonitor mid = (liftM setupMonitors ask) >>= return . M.lookup mid
+
+lookupOutput :: Monad m => OutputId -> ReaderT Setup m (Maybe Output)
+lookupOutput oid = (liftM setupOutputs ask) >>= return . M.lookup oid
 
 doSwitcheroo :: IO ()
 doSwitcheroo = do
@@ -186,3 +222,13 @@ doSwitcheroo = do
     putStrLn . show $ setup
 
     putStrLn . show $ runReader calculateScreenDimensions setup
+    let Just enabledMonitor = (flip runReader) setup $ do
+            Just a <- findOutput "DVI-D-1"
+            Just mid <- liftM (>>= outputMonitor) $ findOutput "DVI-I-1"
+            Just b <- lookupMonitor mid
+            a `rightOf` b
+    putStrLn . show $ enabledMonitor
+
+    updateMonitor display res enabledMonitor >>= (putStrLn . show)
+
+
