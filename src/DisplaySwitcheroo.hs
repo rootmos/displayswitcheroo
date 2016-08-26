@@ -22,8 +22,6 @@ import Data.List ( unzip4
                  )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
-import Data.Bifunctor ( bimap )
-import Control.Monad.Reader
 import Control.Monad.State.Strict
 
 
@@ -167,7 +165,11 @@ updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
         rot = xrr_ci_rotations prevConfig
         outputs = map (\(OutputId i) -> i) $ monitorOutputs monitor
 
-    xrrSetCrtcConfig display res cid currentTime x y mid rot outputs
+    xrrSetCrtcConfig display res cid currentTime x y mid X.xRR_Rotate_0 outputs
+
+updateScreen :: Xlib.Display -> X.Window -> (Int, Int, Int, Int) -> IO ()
+updateScreen display root (width, height, widthInMillimeters, heightInMillimeters) =
+    xrrSetScreenSize display root (fromIntegral width) (fromIntegral height) (fromIntegral widthInMillimeters) (fromIntegral heightInMillimeters)
 
 calculateScreenDimensions :: Setup -> (Int, Int, Int, Int)
 calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monitors } =
@@ -213,7 +215,7 @@ output `rightOf` existingMonitor = do
       Nothing -> return Nothing
 
 findOutput :: String -> Setup -> Maybe Output
-findOutput name = find ((==) name . outputName) . setupOutputs
+findOutput name = find ((== name) . outputName) . setupOutputs
 
 lookupMonitor :: MonitorId -> Setup -> Maybe Monitor
 lookupMonitor mid = M.lookup mid . setupMonitors
@@ -226,12 +228,16 @@ doSwitcheroo = do
     display <- openDisplay ""
     root <- rootWindow display (defaultScreen display)
     Just res <- xrrGetScreenResourcesCurrent display root
-    setup <- fetchSetup display res
+    initialSetup <- fetchSetup display res
 
-    (flip evalStateT) setup $ do
+    (flip evalStateT) initialSetup $ do
         Just a <- gets $ findOutput "DVI-D-1"
         Just mid <- gets $ findOutput "DVI-I-1" >=> outputMonitor
         Just b <- gets $ lookupMonitor mid
-        m <- a `rightOf` b
+        Just m <- a `rightOf` b
         dim <- gets calculateScreenDimensions
-        lift . putStrLn . show $ dim
+        lift $ do
+            updateScreen display root dim
+            0 <- updateMonitor display res m
+            return ()
+
