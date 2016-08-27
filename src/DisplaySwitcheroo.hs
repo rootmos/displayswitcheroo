@@ -217,11 +217,10 @@ output `rightOfMonitor` existingMonitor = do
                                    , monitorOutputs = [outputId output]
                                    }
     case maybeMonitor of
-      Just monitor -> do
-          modify $ \setup -> setup { setupMonitors = M.insert (monitorId monitor) monitor (setupMonitors setup)
-                                   , setupOutputs = M.insert (outputId output) (output { outputMonitor = Just (monitorId monitor) }) (setupOutputs setup)
-                                   }
-          return (Just monitor)
+      Just newMonitor -> do
+          let newOutput = output { outputMonitor = Just (monitorId newMonitor) }
+          modify $ upsertMonitor newMonitor . upsertOutput newOutput
+          return (Just newMonitor)
       Nothing -> return Nothing
 
 rightOf :: Monad m => Output -> Output -> StateT Setup m (Maybe Monitor)
@@ -229,6 +228,22 @@ output `rightOf` existingOutput = get >>= \setup -> do
     case outputMonitor existingOutput >>= flip lookupMonitor setup of
       Just existingMonitor -> output `rightOfMonitor` existingMonitor
       Nothing -> return Nothing
+
+disable :: Monad m => Output -> StateT Setup m (Maybe Monitor)
+disable Output { outputMonitor = Nothing } = return Nothing
+disable output @ Output { outputMonitor = Just mid } = do
+    maybeMonitor <- gets $ lookupMonitor mid
+    flip (maybe (return Nothing)) maybeMonitor $ \monitor -> do
+        let newMonitor = monitor { monitorMode = Nothing }
+            newOutput = output { outputMonitor = Nothing }
+        modify $ upsertMonitor newMonitor . upsertOutput newOutput
+        return $ Just newMonitor
+
+upsertMonitor :: Monitor -> Setup -> Setup
+upsertMonitor monitor setup = setup { setupMonitors = M.insert (monitorId monitor) monitor (setupMonitors setup) }
+
+upsertOutput :: Output -> Setup -> Setup
+upsertOutput output setup = setup { setupOutputs = M.insert (outputId output) output (setupOutputs setup) }
 
 findOutput :: String -> Setup -> Maybe Output
 findOutput name = find ((== name) . outputName) . setupOutputs
@@ -268,3 +283,12 @@ doSwitcheroo = do
     initialSetup <- fetchSetup display res
 
     putStrLn . show $ map (compareDesiredSetup initialSetup) (configDesiredSetups config)
+
+    (flip evalStateT) initialSetup $ do
+        Just output <- gets $ findOutput "DVI-D-1"
+        Just m <- disable output
+        dim <- gets calculateScreenDimensions
+        lift $ do
+            updateScreen display root dim
+            0 <- updateMonitor display res m
+            return ()
