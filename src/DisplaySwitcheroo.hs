@@ -245,6 +245,33 @@ output `rightOf` (Output { outputMonitor = Just mid }) = do
     monitor <- lookupMonitorE mid
     output `rightOfMonitor` monitor
 
+topLeft :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
+topLeft output @ Output { outputMonitor = Nothing } = do
+    disabledMonitor <- freeMonitor output
+    mode <- preferredModeE output
+    let newMonitor = disabledMonitor { monitorMode = Just mode
+                                     , monitorX = 0
+                                     , monitorY = 0
+                                     , monitorWidth = modeWidth mode
+                                     , monitorHeight = modeHeight mode
+                                     , monitorOutputs = [outputId output]
+                                     }
+        newOutput = output { outputMonitor = Just (monitorId newMonitor) }
+    modify $ upsertMonitor newMonitor . upsertOutput newOutput
+    return newMonitor
+topLeft output @ Output { outputMonitor = Just mid } = do
+    oldMonitor <- lookupMonitorE mid
+    mode <- preferredModeE output
+    let newMonitor = oldMonitor { monitorMode = Just mode
+                                , monitorX = 0
+                                , monitorY = 0
+                                , monitorWidth = modeWidth mode
+                                , monitorHeight = modeHeight mode
+                                , monitorOutputs = [outputId output]
+                                }
+    modify $ upsertMonitor newMonitor
+    return newMonitor
+
 disable :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
 disable o @ Output { outputMonitor = Nothing } = throwError $ OutputAlreadyDisabled o
 disable output @ Output { outputMonitor = Just mid } = do
@@ -317,9 +344,8 @@ doSwitcheroo = do
     putStrLn . show $ map (compareDesiredSetup initialSetup) (configDesiredSetups config)
 
     result <- (flip runStateT) initialSetup . runExceptT $ do
-        a <- findOutputE "DVI-I-1"
         b <- findOutputE "DVI-D-1"
-        m <- b `rightOf` a
+        m <- topLeft b
         dim <- gets calculateScreenDimensions
         0 <- liftIO $ updateMonitor display res m
         liftIO $ updateScreen display root dim
