@@ -58,6 +58,8 @@ preferredMode :: Output -> Maybe Mode
 preferredMode Output { outputModes = [] } = Nothing
 preferredMode Output { outputModes = modes } = Just $ maximum modes
 
+preferredModeE :: MonadError Failure m => Output -> m Mode
+preferredModeE output = maybe (throwError $ UnableToDeterminePreferredMode output) return $ preferredMode output
 
 newtype MonitorId = MonitorId X.RRCrtc
     deriving ( Show, Eq, Ord )
@@ -206,24 +208,24 @@ calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monito
 
 rightOfMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
 output `rightOfMonitor` existingMonitor = do
-    Setup { setupMonitors = monitors } <- get
-    let maybeMonitor = do
-            disabledMonitor <- listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
-                map (flip M.lookup $ monitors) (outputMonitors output)
-            mode <- preferredMode output
-            return disabledMonitor { monitorMode = Just mode
-                                   , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
-                                   , monitorY = monitorY existingMonitor
-                                   , monitorWidth = modeWidth mode
-                                   , monitorHeight = modeHeight mode
-                                   , monitorOutputs = [outputId output]
-                                   }
-    case maybeMonitor of
-      Just newMonitor -> do
-          let newOutput = output { outputMonitor = Just (monitorId newMonitor) }
-          modify $ upsertMonitor newMonitor . upsertOutput newOutput
-          return newMonitor
-      Nothing -> throwError $ NoDisabledMonitors
+    disabledMonitor <- freeMonitor output
+    mode <- preferredModeE output
+    let newMonitor = disabledMonitor { monitorMode = Just mode
+                                     , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
+                                     , monitorY = monitorY existingMonitor
+                                     , monitorWidth = modeWidth mode
+                                     , monitorHeight = modeHeight mode
+                                     , monitorOutputs = [outputId output]
+                                     }
+        newOutput = output { outputMonitor = Just (monitorId newMonitor) }
+    modify $ upsertMonitor newMonitor . upsertOutput newOutput
+    return newMonitor
+
+freeMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
+freeMonitor output = get >>= \Setup { setupMonitors = monitors } ->
+    maybe (throwError NoFreeMonitors) return $
+        listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
+            map (flip M.lookup $ monitors) (outputMonitors output)
 
 rightOf :: (MonadError Failure m, MonadState Setup m) => Output -> Output -> m Monitor
 output `rightOf` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
@@ -269,7 +271,8 @@ data Failure = NoSuchOutput String
              | MonitorNotFound MonitorId
              | OutputAlreadyDisabled Output
              | OutputNotEnabled Output
-             | NoDisabledMonitors
+             | NoFreeMonitors
+             | UnableToDeterminePreferredMode Output
              deriving Show
 
 data SetupDifference = SetupDifference { setupDifferenceEnable :: [OutputId]
