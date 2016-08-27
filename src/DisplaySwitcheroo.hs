@@ -207,7 +207,7 @@ calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monito
             return (mX, mY, dX, dY)
 
 rightOfMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
-output `rightOfMonitor` existingMonitor = do
+(output @ Output { outputMonitor = Nothing }) `rightOfMonitor` existingMonitor = do
     disabledMonitor <- freeMonitor output
     mode <- preferredModeE output
     let newMonitor = disabledMonitor { monitorMode = Just mode
@@ -219,6 +219,18 @@ output `rightOfMonitor` existingMonitor = do
                                      }
         newOutput = output { outputMonitor = Just (monitorId newMonitor) }
     modify $ upsertMonitor newMonitor . upsertOutput newOutput
+    return newMonitor
+(output @ Output { outputMonitor = Just mid }) `rightOfMonitor` existingMonitor = do
+    oldMonitor <- lookupMonitorE mid
+    mode <- preferredModeE output
+    let newMonitor = oldMonitor { monitorMode = Just mode
+                                , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
+                                , monitorY = monitorY existingMonitor
+                                , monitorWidth = modeWidth mode
+                                , monitorHeight = modeHeight mode
+                                , monitorOutputs = [outputId output]
+                                }
+    modify $ upsertMonitor newMonitor
     return newMonitor
 
 freeMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
@@ -309,7 +321,7 @@ doSwitcheroo = do
         b <- findOutputE "DVI-D-1"
         m <- b `rightOf` a
         dim <- gets calculateScreenDimensions
-        liftIO $ updateScreen display root dim
         0 <- liftIO $ updateMonitor display res m
+        liftIO $ updateScreen display root dim
         return ()
     putStrLn . show $ result
