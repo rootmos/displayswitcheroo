@@ -31,6 +31,7 @@ import Data.Bits ( testBit )
 import Control.Monad.State.Strict
 import Control.Monad.Except
 import Data.Bifunctor ( bimap )
+import Text.Printf ( printf )
 
 
 newtype OutputId = OutputId X.RROutput
@@ -84,19 +85,19 @@ newtype ModeId = ModeId X.RRMode
 data Mode = Mode { modeId :: ModeId
                  , modeWidth :: Int
                  , modeHeight :: Int
-                 , modeHz :: Int
+                 , modeHz :: Double
+                 , modeInterlaced :: Bool
+                 , modeDoubleScan :: Bool
                  }
                  deriving ( Eq )
 
 instance Ord Mode where
     x `compare` y = (toTuple x) `compare` (toTuple y)
-        where toTuple m = (modeWidth m, modeHeight m, modeHz m)
+        where toTuple m = (modeWidth m, modeHeight m, modeHz m, not . modeInterlaced $ m)
 
 instance Show Mode where
-    show Mode { modeWidth = w, modeHeight = h, modeHz = hz } =
-        show w ++ "x" ++ show h ++ "(" ++ show hz ++ "Hz)"
-
-
+    show mode = printf "%dx%d%s(%.2fHz)" (modeWidth mode) (modeHeight mode) flags (modeHz mode)
+        where flags = if (modeInterlaced mode) then "i" else "" ++ if (modeDoubleScan mode) then "d" else ""
 
 modeMap :: XRRScreenResources -> M.Map ModeId Mode
 modeMap XRRScreenResources { xrr_sr_modes = modes } =
@@ -107,19 +108,25 @@ modeMap XRRScreenResources { xrr_sr_modes = modes } =
                                              , modeWidth = fromIntegral $ xrr_mi_width mi
                                              , modeHeight = fromIntegral $ xrr_mi_height mi
                                              , modeHz = refreshRate mi
+                                             , modeInterlaced = isInterlaced mi
+                                             , modeDoubleScan = isDoubleScan mi
                                              })
 
-refreshRate :: XRRModeInfo -> Int
-refreshRate mi = round $ (dotClock / (hTotal * vTotal) :: Double)
+refreshRate :: XRRModeInfo -> Double
+refreshRate mi = dotClock / (hTotal * vTotal)
     where
         dotClock = fromIntegral $ xrr_mi_dotClock mi
         hTotal = fromIntegral $ xrr_mi_hTotal mi
         vTotal
-          | doubleScanActive && not interlaceActive = 2 * (fromIntegral $ xrr_mi_vTotal mi)
-          | not doubleScanActive && interlaceActive = (fromIntegral $ xrr_mi_vTotal mi) / 2
+          | (isDoubleScan mi) && not (isInterlaced mi) = 2 * (fromIntegral $ xrr_mi_vTotal mi)
+          | not (isDoubleScan mi) && (isInterlaced mi) = (fromIntegral $ xrr_mi_vTotal mi) / 2
           | otherwise = fromIntegral $ xrr_mi_vTotal mi
-        doubleScanActive = testBit (xrr_mi_modeFlags mi) 5
-        interlaceActive = testBit (xrr_mi_modeFlags mi) 4
+
+isInterlaced :: XRRModeInfo -> Bool
+isInterlaced mi = testBit (xrr_mi_modeFlags mi) 4
+
+isDoubleScan :: XRRModeInfo -> Bool
+isDoubleScan mi = testBit (xrr_mi_modeFlags mi) 5
 
 data Setup = Setup { setupOutputs :: M.Map OutputId Output
                    , setupMonitors :: M.Map MonitorId Monitor
@@ -272,6 +279,39 @@ topLeft output @ Output { outputMonitor = Just mid } = do
     modify $ upsertMonitor newMonitor
     return newMonitor
 
+sameAsMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
+(output @ Output { outputMonitor = Nothing }) `sameAsMonitor` existingMonitor = do
+    disabledMonitor <- freeMonitor output
+    mode <- preferredModeE output
+    let newMonitor = disabledMonitor { monitorMode = Just mode
+                                     , monitorX = monitorX existingMonitor
+                                     , monitorY = monitorY existingMonitor
+                                     , monitorWidth = modeWidth mode
+                                     , monitorHeight = modeHeight mode
+                                     , monitorOutputs = [outputId output]
+                                     }
+        newOutput = output { outputMonitor = Just (monitorId newMonitor) }
+    modify $ upsertMonitor newMonitor . upsertOutput newOutput
+    return newMonitor
+(output @ Output { outputMonitor = Just mid }) `sameAsMonitor` existingMonitor = do
+    oldMonitor <- lookupMonitorE mid
+    mode <- preferredModeE output
+    let newMonitor = oldMonitor { monitorMode = Just mode
+                                , monitorX = monitorX existingMonitor
+                                , monitorY = monitorY existingMonitor
+                                , monitorWidth = modeWidth mode
+                                , monitorHeight = modeHeight mode
+                                , monitorOutputs = [outputId output]
+                                }
+    modify $ upsertMonitor newMonitor
+    return newMonitor
+
+sameAs :: (MonadError Failure m, MonadState Setup m) => Output -> Output -> m Monitor
+output `sameAs` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
+output `sameAs` (Output { outputMonitor = Just mid }) = do
+    monitor <- lookupMonitorE mid
+    output `sameAsMonitor` monitor
+
 disable :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
 disable o @ Output { outputMonitor = Nothing } = throwError $ OutputAlreadyDisabled o
 disable output @ Output { outputMonitor = Just mid } = do
@@ -344,10 +384,15 @@ doSwitcheroo = do
     putStrLn . show $ map (compareDesiredSetup initialSetup) (configDesiredSetups config)
 
     result <- (flip runStateT) initialSetup . runExceptT $ do
+        a <- findOutputE "DVI-I-1"
         b <- findOutputE "DVI-D-1"
-        m <- topLeft b
+        c <- findOutputE "HDMI-1"
+        m1 <- b `rightOf` a
+        m2 <- c `sameAs` b
+
         dim <- gets calculateScreenDimensions
-        0 <- liftIO $ updateMonitor display res m
+        0 <- liftIO $ updateMonitor display res m1
+        0 <- liftIO $ updateMonitor display res m2
         liftIO $ updateScreen display root dim
         return ()
     putStrLn . show $ result
