@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module DisplaySwitcheroo
     ( doSwitcheroo
     ) where
@@ -28,6 +29,7 @@ import Data.List ( unzip4
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Control.Monad.State.Strict
+import Control.Monad.Except
 import Data.Bifunctor ( bimap )
 
 
@@ -162,24 +164,24 @@ fetchSetup display res = do
                         , monitorOutputs = map (OutputId . fromIntegral) (xrr_ci_outputs ci)
                         }
 
-updateMonitor :: Xlib.Display -> XRRScreenResources -> Monitor -> IO X.Status
+updateMonitor :: MonadIO m => Xlib.Display -> XRRScreenResources -> Monitor -> m X.Status
 updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid, monitorMode = Nothing }) =
-    xrrSetCrtcConfig display res cid currentTime 0 0 none X.xRR_Rotate_0 []
+    liftIO $ xrrSetCrtcConfig display res cid currentTime 0 0 none X.xRR_Rotate_0 []
 
 updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
                                              , monitorMode = Just (Mode { modeId = ModeId mid })
                                              }) = do
-    Just prevConfig <- xrrGetCrtcInfo display res cid
+    Just prevConfig <- liftIO $ xrrGetCrtcInfo display res cid
     let x = fromIntegral $ monitorX monitor
         y = fromIntegral $ monitorY monitor
         rot = xrr_ci_rotations prevConfig
         outputs = map (\(OutputId i) -> i) $ monitorOutputs monitor
 
-    xrrSetCrtcConfig display res cid currentTime x y mid X.xRR_Rotate_0 outputs
+    liftIO $ xrrSetCrtcConfig display res cid currentTime x y mid X.xRR_Rotate_0 outputs
 
-updateScreen :: Xlib.Display -> X.Window -> (Int, Int, Int, Int) -> IO ()
+updateScreen :: MonadIO m => Xlib.Display -> X.Window -> (Int, Int, Int, Int) -> m ()
 updateScreen display root (width, height, widthInMillimeters, heightInMillimeters) =
-    xrrSetScreenSize display root (fromIntegral width) (fromIntegral height) (fromIntegral widthInMillimeters) (fromIntegral heightInMillimeters)
+    liftIO $ xrrSetScreenSize display root (fromIntegral width) (fromIntegral height) (fromIntegral widthInMillimeters) (fromIntegral heightInMillimeters)
 
 calculateScreenDimensions :: Setup -> (Int, Int, Int, Int)
 calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monitors } =
@@ -202,7 +204,7 @@ calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monito
                 dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
             return (mX, mY, dX, dY)
 
-rightOfMonitor :: Monad m => Output -> Monitor -> StateT Setup m (Maybe Monitor)
+rightOfMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
 output `rightOfMonitor` existingMonitor = do
     Setup { setupMonitors = monitors } <- get
     let maybeMonitor = do
@@ -220,24 +222,23 @@ output `rightOfMonitor` existingMonitor = do
       Just newMonitor -> do
           let newOutput = output { outputMonitor = Just (monitorId newMonitor) }
           modify $ upsertMonitor newMonitor . upsertOutput newOutput
-          return (Just newMonitor)
-      Nothing -> return Nothing
+          return newMonitor
+      Nothing -> throwError $ NoDisabledMonitors
 
-rightOf :: Monad m => Output -> Output -> StateT Setup m (Maybe Monitor)
-output `rightOf` existingOutput = get >>= \setup -> do
-    case outputMonitor existingOutput >>= flip lookupMonitor setup of
-      Just existingMonitor -> output `rightOfMonitor` existingMonitor
-      Nothing -> return Nothing
+rightOf :: (MonadError Failure m, MonadState Setup m) => Output -> Output -> m Monitor
+output `rightOf` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
+output `rightOf` (Output { outputMonitor = Just mid }) = do
+    monitor <- lookupMonitorE mid
+    output `rightOfMonitor` monitor
 
-disable :: Monad m => Output -> StateT Setup m (Maybe Monitor)
-disable Output { outputMonitor = Nothing } = return Nothing
+disable :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
+disable o @ Output { outputMonitor = Nothing } = throwError $ OutputAlreadyDisabled o
 disable output @ Output { outputMonitor = Just mid } = do
-    maybeMonitor <- gets $ lookupMonitor mid
-    flip (maybe (return Nothing)) maybeMonitor $ \monitor -> do
-        let newMonitor = monitor { monitorMode = Nothing }
-            newOutput = output { outputMonitor = Nothing }
-        modify $ upsertMonitor newMonitor . upsertOutput newOutput
-        return $ Just newMonitor
+    monitor <- lookupMonitorE mid
+    let newMonitor = monitor { monitorMode = Nothing }
+        newOutput = output { outputMonitor = Nothing }
+    modify $ upsertMonitor newMonitor . upsertOutput newOutput
+    return newMonitor
 
 upsertMonitor :: Monitor -> Setup -> Setup
 upsertMonitor monitor setup = setup { setupMonitors = M.insert (monitorId monitor) monitor (setupMonitors setup) }
@@ -248,12 +249,28 @@ upsertOutput output setup = setup { setupOutputs = M.insert (outputId output) ou
 findOutput :: String -> Setup -> Maybe Output
 findOutput name = find ((== name) . outputName) . setupOutputs
 
+findOutputE :: (MonadError Failure m, MonadState Setup m) => String -> m Output
+findOutputE name = (gets $ findOutput name) >>= maybe (throwError $ NoSuchOutput name) return
+
 lookupMonitor :: MonitorId -> Setup -> Maybe Monitor
-lookupMonitor mid = M.lookup mid . setupMonitors
+lookupMonitor id = M.lookup id . setupMonitors
+
+lookupMonitorE :: (MonadError Failure m, MonadState Setup m) => MonitorId -> m Monitor
+lookupMonitorE id = (gets $ lookupMonitor id) >>= maybe (throwError $ MonitorNotFound id) return
 
 lookupOutput :: OutputId -> Setup -> Maybe Output
-lookupOutput oid = M.lookup oid . setupOutputs
+lookupOutput id = M.lookup id . setupOutputs
 
+lookupOutputE :: (MonadError Failure m, MonadState Setup m) => OutputId -> m Output
+lookupOutputE id = (gets $ lookupOutput id) >>= maybe (throwError $ OutputNotFound id) return
+
+data Failure = NoSuchOutput String
+             | OutputNotFound OutputId
+             | MonitorNotFound MonitorId
+             | OutputAlreadyDisabled Output
+             | OutputNotEnabled Output
+             | NoDisabledMonitors
+             deriving Show
 
 data SetupDifference = SetupDifference { setupDifferenceEnable :: [OutputId]
                                        , setupDifferenceDisable :: [OutputId]
@@ -284,11 +301,12 @@ doSwitcheroo = do
 
     putStrLn . show $ map (compareDesiredSetup initialSetup) (configDesiredSetups config)
 
-    (flip evalStateT) initialSetup $ do
-        Just output <- gets $ findOutput "DVI-D-1"
-        Just m <- disable output
+    result <- (flip runStateT) initialSetup . runExceptT $ do
+        a <- findOutputE "DVI-I-1"
+        b <- findOutputE "DVI-D-1"
+        m <- b `rightOf` a
         dim <- gets calculateScreenDimensions
-        lift $ do
-            updateScreen display root dim
-            0 <- updateMonitor display res m
-            return ()
+        liftIO $ updateScreen display root dim
+        0 <- liftIO $ updateMonitor display res m
+        return ()
+    putStrLn . show $ result
