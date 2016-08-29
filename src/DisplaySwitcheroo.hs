@@ -223,8 +223,8 @@ output `rightOfMonitor` existingMonitor = do
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
 
     let modifiedMonitor = monitor { monitorMode = Just mode
-                                  , monitorX = monitorX monitor + monitorWidth monitor
-                                  , monitorY = monitorY monitor
+                                  , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
+                                  , monitorY = monitorY existingMonitor
                                   , monitorWidth = modeWidth mode
                                   , monitorHeight = modeHeight mode
                                   , monitorOutputs = [outputId output]
@@ -274,8 +274,8 @@ output `sameAsMonitor` existingMonitor = do
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
 
     let modifiedMonitor = monitor { monitorMode = Just mode
-                                  , monitorX = monitorX monitor
-                                  , monitorY = monitorY monitor
+                                  , monitorX = monitorX existingMonitor
+                                  , monitorY = monitorY existingMonitor
                                   , monitorWidth = modeWidth mode
                                   , monitorHeight = modeHeight mode
                                   , monitorOutputs = [outputId output]
@@ -352,6 +352,20 @@ compareDesiredSetup setup desired = do
               allOutputIds = map outputId allOutputs
               (enabledOutputs, disabledOutputs) = bimap (map outputId) (map outputId) $ partition isOutputEnabled allOutputs
 
+applyChanges :: (MonadState Setup m, MonadIO m) => Xlib.Display -> X.Window -> XRRScreenResources -> Setup -> Setup -> m ()
+applyChanges display root res initialSetup setup = do
+    if dimensionsGrew then (liftIO $ updateScreen display root dimAfter) else return ()
+    forM_ (filter monitorChanged . M.elems $ setupMonitors setup) $ \monitor -> do
+        0 <- liftIO $ updateMonitor display res monitor
+        modify $ upsertMonitor monitor { monitorChanged = False }
+    if dimensionsShrank then (liftIO $ updateScreen display root dimAfter) else return ()
+    where
+        dimBefore = calculateScreenDimensions initialSetup
+        dimAfter = calculateScreenDimensions setup
+        dimensionsGrew = dimAfter > dimBefore
+        dimensionsShrank = dimAfter < dimBefore
+
+
 doSwitcheroo :: IO ()
 doSwitcheroo = do
     Right config <- loadConfig "example.json"
@@ -367,12 +381,8 @@ doSwitcheroo = do
         a <- findOutputE "DVI-I-1"
         b <- findOutputE "DVI-D-1"
         c <- findOutputE "HDMI-1"
-        m1 <- b `rightOf` a
-        m2 <- c `sameAs` b
+        _ <- b `rightOf` a
+        _ <- c `sameAs` b
 
-        dim <- gets calculateScreenDimensions
-        0 <- liftIO $ updateMonitor display res m1
-        0 <- liftIO $ updateMonitor display res m2
-        liftIO $ updateScreen display root dim
-        return ()
+        get >>= applyChanges display root res initialSetup
     putStrLn . show $ result
