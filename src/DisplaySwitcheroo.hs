@@ -16,6 +16,7 @@ import qualified Graphics.X11.Xlib.Types as Xlib
 import Control.Monad ( liftM
                      , forM
                      , forM_
+                     , foldM_
                      )
 import Data.Maybe ( catMaybes
                   , listToMaybe
@@ -26,6 +27,7 @@ import Data.List ( unzip4
                  , (\\)
                  , partition
                  )
+import Data.Either ( rights )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Control.Monad.State.Strict
@@ -296,7 +298,9 @@ disable :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
 disable o @ Output { outputMonitor = Nothing } = throwError $ OutputAlreadyDisabled o
 disable output @ Output { outputMonitor = Just mid } = do
     monitor <- lookupMonitorE mid
-    let newMonitor = monitor { monitorMode = Nothing }
+    let newMonitor = monitor { monitorMode = Nothing
+                             , monitorChanged = True
+                             }
         newOutput = output { outputMonitor = Nothing }
     modify $ upsertMonitor newMonitor . upsertOutput newOutput
     return newMonitor
@@ -341,7 +345,7 @@ data SetupDifference = SetupDifference { setupDifferenceEnable :: [OutputId]
 compareDesiredSetup :: Setup -> DesiredSetup -> Either String SetupDifference
 compareDesiredSetup setup desired = do
     requiredOutputs <- requiredOutputsE
-    return $ SetupDifference { setupDifferenceEnable = requiredOutputs `intersect` disabledOutputs
+    return $ SetupDifference { setupDifferenceEnable = requiredOutputs
                              , setupDifferenceDisable = (allOutputIds \\ requiredOutputs) `intersect` enabledOutputs
                              }
         where requiredOutputsE = sequence $ map requireOutput (desiredSetupOutputs desired)
@@ -350,7 +354,7 @@ compareDesiredSetup setup desired = do
               findConnectedOutput name = mfilter isOutputConnected $ findOutput name setup
               allOutputs = M.elems $ setupOutputs setup
               allOutputIds = map outputId allOutputs
-              (enabledOutputs, disabledOutputs) = bimap (map outputId) (map outputId) $ partition isOutputEnabled allOutputs
+              enabledOutputs = map outputId $ filter isOutputEnabled allOutputs
 
 applyChanges :: (MonadState Setup m, MonadIO m) => Xlib.Display -> X.Window -> XRRScreenResources -> Setup -> Setup -> m ()
 applyChanges display root res initialSetup setup = do
@@ -375,14 +379,21 @@ doSwitcheroo = do
     Just res <- xrrGetScreenResourcesCurrent display root
     initialSetup <- fetchSetup display res
 
-    putStrLn . show $ map (compareDesiredSetup initialSetup) (configDesiredSetups config)
+    let desiredSetups = map (compareDesiredSetup initialSetup) (configDesiredSetups config)
+        selectedSetup = listToMaybe . rights $ desiredSetups
 
-    result <- (flip runStateT) initialSetup . runExceptT $ do
-        a <- findOutputE "DVI-I-1"
-        b <- findOutputE "DVI-D-1"
-        c <- findOutputE "HDMI-1"
-        _ <- b `rightOf` a
-        _ <- c `sameAs` b
+    case selectedSetup of
+      Just desiredSetup -> do
+          putStrLn $ "Selecting: " ++ show desiredSetup
+          result <- (flip runStateT) initialSetup . runExceptT $ do
+              outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable desiredSetup)
+              leftest <- topLeft $ head outputsToEnable
+              foldM_ (\left right -> right `rightOfMonitor` left) leftest (tail outputsToEnable)
 
-        get >>= applyChanges display root res initialSetup
-    putStrLn . show $ result
+              outputsToDisable <- sequence $ map lookupOutputE (setupDifferenceDisable desiredSetup)
+              mapM_ disable outputsToDisable
+
+              get >>= applyChanges display root res initialSetup
+
+          putStrLn . show $ result
+      Nothing -> error $ "No desired setups present: " ++ show desiredSetups
