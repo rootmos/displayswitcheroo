@@ -72,6 +72,7 @@ data Monitor = Monitor { monitorId :: MonitorId
                        , monitorHeight :: Int
                        , monitorMode :: Maybe Mode
                        , monitorOutputs :: [OutputId]
+                       , monitorChanged :: Bool
                        }
                        deriving Show
 
@@ -171,6 +172,7 @@ fetchSetup display res = do
                         , monitorHeight = (fromIntegral $ xrr_ci_height ci)
                         , monitorMode = M.lookup (ModeId $ xrr_ci_mode ci) (modeMap res)
                         , monitorOutputs = map (OutputId . fromIntegral) (xrr_ci_outputs ci)
+                        , monitorChanged = False
                         }
 
 updateMonitor :: MonadIO m => Xlib.Display -> XRRScreenResources -> Monitor -> m X.Status
@@ -214,31 +216,23 @@ calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monito
             return (mX, mY, dX, dY)
 
 rightOfMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
-(output @ Output { outputMonitor = Nothing }) `rightOfMonitor` existingMonitor = do
-    disabledMonitor <- freeMonitor output
+output `rightOfMonitor` existingMonitor = do
     mode <- preferredModeE output
-    let newMonitor = disabledMonitor { monitorMode = Just mode
-                                     , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
-                                     , monitorY = monitorY existingMonitor
-                                     , monitorWidth = modeWidth mode
-                                     , monitorHeight = modeHeight mode
-                                     , monitorOutputs = [outputId output]
-                                     }
-        newOutput = output { outputMonitor = Just (monitorId newMonitor) }
-    modify $ upsertMonitor newMonitor . upsertOutput newOutput
-    return newMonitor
-(output @ Output { outputMonitor = Just mid }) `rightOfMonitor` existingMonitor = do
-    oldMonitor <- lookupMonitorE mid
-    mode <- preferredModeE output
-    let newMonitor = oldMonitor { monitorMode = Just mode
-                                , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
-                                , monitorY = monitorY existingMonitor
-                                , monitorWidth = modeWidth mode
-                                , monitorHeight = modeHeight mode
-                                , monitorOutputs = [outputId output]
-                                }
-    modify $ upsertMonitor newMonitor
-    return newMonitor
+    monitor <- case output of
+      Output { outputMonitor = Nothing } -> freeMonitor output
+      Output { outputMonitor = Just mid } -> lookupMonitorE mid
+
+    let modifiedMonitor = monitor { monitorMode = Just mode
+                                  , monitorX = monitorX monitor + monitorWidth monitor
+                                  , monitorY = monitorY monitor
+                                  , monitorWidth = modeWidth mode
+                                  , monitorHeight = modeHeight mode
+                                  , monitorOutputs = [outputId output]
+                                  , monitorChanged = True
+                                  }
+        modifiedOutput = output { outputMonitor = Just (monitorId modifiedMonitor) }
+    modify $ upsertMonitor modifiedMonitor . upsertOutput modifiedOutput
+    return modifiedMonitor
 
 freeMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
 freeMonitor output = get >>= \Setup { setupMonitors = monitors } ->
@@ -253,58 +247,44 @@ output `rightOf` (Output { outputMonitor = Just mid }) = do
     output `rightOfMonitor` monitor
 
 topLeft :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
-topLeft output @ Output { outputMonitor = Nothing } = do
-    disabledMonitor <- freeMonitor output
+topLeft output = do
     mode <- preferredModeE output
-    let newMonitor = disabledMonitor { monitorMode = Just mode
-                                     , monitorX = 0
-                                     , monitorY = 0
-                                     , monitorWidth = modeWidth mode
-                                     , monitorHeight = modeHeight mode
-                                     , monitorOutputs = [outputId output]
-                                     }
-        newOutput = output { outputMonitor = Just (monitorId newMonitor) }
-    modify $ upsertMonitor newMonitor . upsertOutput newOutput
-    return newMonitor
-topLeft output @ Output { outputMonitor = Just mid } = do
-    oldMonitor <- lookupMonitorE mid
-    mode <- preferredModeE output
-    let newMonitor = oldMonitor { monitorMode = Just mode
-                                , monitorX = 0
-                                , monitorY = 0
-                                , monitorWidth = modeWidth mode
-                                , monitorHeight = modeHeight mode
-                                , monitorOutputs = [outputId output]
-                                }
-    modify $ upsertMonitor newMonitor
-    return newMonitor
+    monitor <- case output of
+      Output { outputMonitor = Nothing } -> freeMonitor output
+      Output { outputMonitor = Just mid } -> lookupMonitorE mid
+
+    let modifiedMonitor = monitor { monitorMode = Just mode
+                                  , monitorX = 0
+                                  , monitorY = 0
+                                  , monitorWidth = modeWidth mode
+                                  , monitorHeight = modeHeight mode
+                                  , monitorOutputs = [outputId output]
+                                  , monitorChanged = True
+                                  }
+        modifiedOutput = output { outputMonitor = Just (monitorId modifiedMonitor) }
+
+    modify $ upsertMonitor modifiedMonitor . upsertOutput modifiedOutput
+    return modifiedMonitor
 
 sameAsMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
-(output @ Output { outputMonitor = Nothing }) `sameAsMonitor` existingMonitor = do
-    disabledMonitor <- freeMonitor output
+output `sameAsMonitor` existingMonitor = do
     mode <- preferredModeE output
-    let newMonitor = disabledMonitor { monitorMode = Just mode
-                                     , monitorX = monitorX existingMonitor
-                                     , monitorY = monitorY existingMonitor
-                                     , monitorWidth = modeWidth mode
-                                     , monitorHeight = modeHeight mode
-                                     , monitorOutputs = [outputId output]
-                                     }
-        newOutput = output { outputMonitor = Just (monitorId newMonitor) }
-    modify $ upsertMonitor newMonitor . upsertOutput newOutput
-    return newMonitor
-(output @ Output { outputMonitor = Just mid }) `sameAsMonitor` existingMonitor = do
-    oldMonitor <- lookupMonitorE mid
-    mode <- preferredModeE output
-    let newMonitor = oldMonitor { monitorMode = Just mode
-                                , monitorX = monitorX existingMonitor
-                                , monitorY = monitorY existingMonitor
-                                , monitorWidth = modeWidth mode
-                                , monitorHeight = modeHeight mode
-                                , monitorOutputs = [outputId output]
-                                }
-    modify $ upsertMonitor newMonitor
-    return newMonitor
+    monitor <- case output of
+      Output { outputMonitor = Nothing } -> freeMonitor output
+      Output { outputMonitor = Just mid } -> lookupMonitorE mid
+
+    let modifiedMonitor = monitor { monitorMode = Just mode
+                                  , monitorX = monitorX monitor
+                                  , monitorY = monitorY monitor
+                                  , monitorWidth = modeWidth mode
+                                  , monitorHeight = modeHeight mode
+                                  , monitorOutputs = [outputId output]
+                                  , monitorChanged = True
+                                  }
+        modifiedOutput = output { outputMonitor = Just (monitorId modifiedMonitor) }
+
+    modify $ upsertMonitor modifiedMonitor . upsertOutput modifiedOutput
+    return modifiedMonitor
 
 sameAs :: (MonadError Failure m, MonadState Setup m) => Output -> Output -> m Monitor
 output `sameAs` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
