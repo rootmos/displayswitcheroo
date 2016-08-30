@@ -4,6 +4,7 @@ module DisplaySwitcheroo
     ) where
 
 import DisplaySwitcheroo.Config
+import DisplaySwitcheroo.Logging
 
 import Graphics.X11 ( openDisplay
                     , rootWindow
@@ -379,13 +380,15 @@ doSwitcheroo = do
     Just res <- xrrGetScreenResourcesCurrent display root
     initialSetup <- fetchSetup display res
 
+    setupLogging config
+
     let desiredSetups = map (compareDesiredSetup initialSetup) (configDesiredSetups config)
         selectedSetup = listToMaybe . rights $ desiredSetups
 
     case selectedSetup of
       Just desiredSetup -> do
-          putStrLn $ "Selecting: " ++ show desiredSetup
-          result <- (flip runStateT) initialSetup . runExceptT $ do
+          _ <- (flip runStateT) initialSetup . runExceptT $ do
+              infoL $ "Selecting: " ++ show desiredSetup
               outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable desiredSetup)
               leftest <- topLeft $ head outputsToEnable
               foldM_ (\left right -> right `rightOfMonitor` left) leftest (tail outputsToEnable)
@@ -393,7 +396,8 @@ doSwitcheroo = do
               outputsToDisable <- sequence $ map lookupOutputE (setupDifferenceDisable desiredSetup)
               mapM_ disable outputsToDisable
 
-              get >>= applyChanges display root res initialSetup
-
-          putStrLn . show $ result
-      Nothing -> error $ "No desired setups present: " ++ show desiredSetups
+              result <- get >>= applyChanges display root res initialSetup
+              debugL $ "Applied changes: " ++ show result
+          return ()
+      Nothing -> do
+          errorL $ "No desired setups present: " ++ show desiredSetups
