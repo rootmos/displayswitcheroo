@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, ImpredicativeTypes, ExistentialQuantification #-}
 module DisplaySwitcheroo
     ( doSwitcheroo
     ) where
@@ -82,6 +82,20 @@ data Monitor = Monitor { monitorId :: MonitorId
 isMonitorEnabled :: Monitor -> Bool
 isMonitorEnabled Monitor { monitorMode = Nothing } = False
 isMonitorEnabled _ = True
+
+data Field a = forall b. Eq b => Field (a -> b)
+
+instance Eq Monitor where
+    m == n = and $ map (\(Field f) -> f m == f n) fields
+        where
+            fields = [ Field monitorId
+                     , Field monitorX
+                     , Field monitorY
+                     , Field monitorWidth
+                     , Field monitorHeight
+                     , Field monitorMode
+                     , Field monitorOutputs
+                     ]
 
 newtype ModeId = ModeId X.RRMode
     deriving ( Show, Eq, Ord)
@@ -221,6 +235,9 @@ calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monito
                 dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
             return (mX, mY, dX, dY)
 
+compareAndTagAsChanged :: Monitor -> Monitor -> Monitor
+compareAndTagAsChanged old new = new { monitorChanged = not $ new == old }
+
 rightOfMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
 output `rightOfMonitor` existingMonitor = do
     mode <- preferredModeE output
@@ -228,14 +245,14 @@ output `rightOfMonitor` existingMonitor = do
       Output { outputMonitor = Nothing } -> freeMonitor output
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
 
-    let modifiedMonitor = monitor { monitorMode = Just mode
-                                  , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
-                                  , monitorY = monitorY existingMonitor
-                                  , monitorWidth = modeWidth mode
-                                  , monitorHeight = modeHeight mode
-                                  , monitorOutputs = [outputId output]
-                                  , monitorChanged = True
-                                  }
+    let newMonitor = monitor { monitorMode = Just mode
+                             , monitorX = monitorX existingMonitor + monitorWidth existingMonitor
+                             , monitorY = monitorY existingMonitor
+                             , monitorWidth = modeWidth mode
+                             , monitorHeight = modeHeight mode
+                             , monitorOutputs = [outputId output]
+                             }
+        modifiedMonitor = compareAndTagAsChanged monitor newMonitor
         modifiedOutput = output { outputMonitor = Just (monitorId modifiedMonitor) }
     modify $ upsertMonitor modifiedMonitor . upsertOutput modifiedOutput
     return modifiedMonitor
@@ -259,14 +276,14 @@ topLeft output = do
       Output { outputMonitor = Nothing } -> freeMonitor output
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
 
-    let modifiedMonitor = monitor { monitorMode = Just mode
-                                  , monitorX = 0
-                                  , monitorY = 0
-                                  , monitorWidth = modeWidth mode
-                                  , monitorHeight = modeHeight mode
-                                  , monitorOutputs = [outputId output]
-                                  , monitorChanged = True
-                                  }
+    let newMonitor = monitor { monitorMode = Just mode
+                             , monitorX = 0
+                             , monitorY = 0
+                             , monitorWidth = modeWidth mode
+                             , monitorHeight = modeHeight mode
+                             , monitorOutputs = [outputId output]
+                             }
+        modifiedMonitor = compareAndTagAsChanged monitor newMonitor
         modifiedOutput = output { outputMonitor = Just (monitorId modifiedMonitor) }
 
     modify $ upsertMonitor modifiedMonitor . upsertOutput modifiedOutput
@@ -279,14 +296,14 @@ output `sameAsMonitor` existingMonitor = do
       Output { outputMonitor = Nothing } -> freeMonitor output
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
 
-    let modifiedMonitor = monitor { monitorMode = Just mode
-                                  , monitorX = monitorX existingMonitor
-                                  , monitorY = monitorY existingMonitor
-                                  , monitorWidth = modeWidth mode
-                                  , monitorHeight = modeHeight mode
-                                  , monitorOutputs = [outputId output]
-                                  , monitorChanged = True
-                                  }
+    let newMonitor = monitor { monitorMode = Just mode
+                             , monitorX = monitorX existingMonitor
+                             , monitorY = monitorY existingMonitor
+                             , monitorWidth = modeWidth mode
+                             , monitorHeight = modeHeight mode
+                             , monitorOutputs = [outputId output]
+                             }
+        modifiedMonitor = compareAndTagAsChanged monitor newMonitor
         modifiedOutput = output { outputMonitor = Just (monitorId modifiedMonitor) }
 
     modify $ upsertMonitor modifiedMonitor . upsertOutput modifiedOutput
@@ -302,11 +319,10 @@ disable :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
 disable o @ Output { outputMonitor = Nothing } = throwError $ OutputAlreadyDisabled o
 disable output @ Output { outputMonitor = Just mid } = do
     monitor <- lookupMonitorE mid
-    let newMonitor = monitor { monitorMode = Nothing
-                             , monitorChanged = True
-                             }
-        newOutput = output { outputMonitor = Nothing }
-    modify $ upsertMonitor newMonitor . upsertOutput newOutput
+    let newMonitor = monitor { monitorMode = Nothing }
+        modifiedMonitor = compareAndTagAsChanged monitor newMonitor
+        modifiedOutput = output { outputMonitor = Nothing }
+    modify $ upsertMonitor modifiedMonitor . upsertOutput modifiedOutput
     return newMonitor
 
 upsertMonitor :: Monitor -> Setup -> Setup
@@ -365,7 +381,7 @@ compareDesiredSetup setup desired = do
 applyChanges :: (MonadState Setup m, MonadIO m) => Xlib.Display -> X.Window -> XRRScreenResources -> Setup -> Setup -> m ()
 applyChanges display root res initialSetup setup = do
     if dimensionsGrew then (liftIO $ updateScreen display root dimAfter) else return ()
-    forM_ (filter monitorChanged . M.elems $ setupMonitors setup) $ \monitor -> do
+    forM_ (changes setup) $ \monitor -> do
         0 <- liftIO $ updateMonitor display res monitor
         modify $ upsertMonitor monitor { monitorChanged = False }
     if dimensionsShrank then (liftIO $ updateScreen display root dimAfter) else return ()
@@ -375,6 +391,8 @@ applyChanges display root res initialSetup setup = do
         dimensionsGrew = dimAfter > dimBefore
         dimensionsShrank = dimAfter < dimBefore
 
+changes :: Setup -> [Monitor]
+changes = filter monitorChanged . M.elems . setupMonitors
 
 doSwitcheroo :: IO ()
 doSwitcheroo = do
@@ -393,7 +411,6 @@ doSwitcheroo = do
     case selectedSetup of
       Just difference -> do
           _ <- (flip runStateT) initialSetup . runExceptT $ do
-              infoL $ "Selecting: " ++ show difference
               outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable difference)
               leftest <- topLeft $ head outputsToEnable
               foldM_ (\left right -> right `rightOfMonitor` left) leftest (tail outputsToEnable)
@@ -401,8 +418,13 @@ doSwitcheroo = do
               outputsToDisable <- sequence $ map lookupOutputE (setupDifferenceDisable difference)
               mapM_ disable outputsToDisable
 
-              result <- get >>= applyChanges display root res initialSetup
-              debugL $ "Successfully applied changes"
+              newSetup <- get
+              case (changes newSetup) of
+                [] -> infoL $ "No changes required"
+                _ -> do
+                    infoL $ "Selecting: " ++ show difference
+                    result <- get >>= applyChanges display root res initialSetup
+                    debugL $ "Successfully applied changes"
           return ()
       Nothing -> do
           errorL $ "No desired setups present: " ++ show desiredSetups
