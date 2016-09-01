@@ -13,10 +13,14 @@ import Data.Either ( rights )
 import Data.Maybe ( listToMaybe )
 import Control.Monad.State.Strict
 import Control.Monad.Except
+import System.Directory ( getAppUserDataDirectory )
+
+configFilePath :: IO FilePath
+configFilePath = getAppUserDataDirectory "config/displayswitcheroo.json"
 
 main :: IO ()
 main = do
-    Right config <- loadConfig "example.json"
+    Right config <- configFilePath >>= loadConfig
 
     display <- openDisplay ""
     root <- rootWindow display (defaultScreen display)
