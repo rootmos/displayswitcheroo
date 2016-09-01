@@ -1,19 +1,24 @@
 {-# LANGUAGE FlexibleContexts, ImpredicativeTypes, ExistentialQuantification #-}
 module DisplaySwitcheroo
-    ( doSwitcheroo
+    ( fetchSetup
     , topLeft
     , rightOf
+    , rightOfMonitor
     , sameAs
+    , sameAsMonitor
     , findOutputE
+    , lookupOutputE
+    , applyChanges
+    , disable
+    , changes
+    , compareDesiredSetup 
+    , setupDifferenceEnable
+    , setupDifferenceDisable
     ) where
 
 import DisplaySwitcheroo.Config
 import DisplaySwitcheroo.Logging
 
-import Graphics.X11 ( openDisplay
-                    , rootWindow
-                    , defaultScreen
-                    )
 import Graphics.X11.Xlib.Extras ( currentTime, none )
 import Graphics.X11.Xrandr
 import qualified Graphics.X11.Types as X
@@ -26,7 +31,6 @@ import Data.List ( unzip4
                  , intersect
                  , (\\)
                  )
-import Data.Either ( rights )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Control.Monad.State.Strict
@@ -389,37 +393,3 @@ applyChanges display root res initialSetup setup = do
 changes :: Setup -> [Monitor]
 changes = filter monitorChanged . M.elems . setupMonitors
 
-doSwitcheroo :: IO ()
-doSwitcheroo = do
-    Right config <- loadConfig "example.json"
-
-    display <- openDisplay ""
-    root <- rootWindow display (defaultScreen display)
-    Just res <- xrrGetScreenResourcesCurrent display root
-    initialSetup <- fetchSetup display res
-
-    setupLogging config
-
-    let desiredSetups = map (compareDesiredSetup initialSetup) (configDesiredSetups config)
-        selectedSetup = listToMaybe . rights $ desiredSetups
-
-    case selectedSetup of
-      Just difference -> do
-          _ <- (flip runStateT) initialSetup . runExceptT $ do
-              outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable difference)
-              leftest <- topLeft $ head outputsToEnable
-              foldM_ (\left right -> right `rightOfMonitor` left) leftest (tail outputsToEnable)
-
-              outputsToDisable <- sequence $ map lookupOutputE (setupDifferenceDisable difference)
-              mapM_ disable outputsToDisable
-
-              newSetup <- get
-              case (changes newSetup) of
-                [] -> infoL $ "No changes required"
-                _ -> do
-                    infoL $ "Selecting: " ++ show difference
-                    _ <- get >>= applyChanges display root res initialSetup
-                    debugL $ "Successfully applied changes"
-          return ()
-      Nothing -> do
-          errorL $ "No desired setups present: " ++ show desiredSetups
