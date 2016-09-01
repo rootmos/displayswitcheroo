@@ -179,12 +179,14 @@ fetchSetup display res = do
                         }
 
 updateMonitor :: MonadIO m => Xlib.Display -> XRRScreenResources -> Monitor -> m X.Status
-updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid, monitorMode = Nothing }) =
+updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid, monitorMode = Nothing }) = do
+    liftIO . debugL $ "Disabling monitor: " ++ show monitor
     liftIO $ xrrSetCrtcConfig display res cid currentTime 0 0 none X.xRR_Rotate_0 []
 
 updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
                                              , monitorMode = Just (Mode { modeId = ModeId mid })
                                              }) = do
+    liftIO . debugL $ "Updating monitor: " ++ show monitor
     Just prevConfig <- liftIO $ xrrGetCrtcInfo display res cid
     let x = fromIntegral $ monitorX monitor
         y = fromIntegral $ monitorY monitor
@@ -194,7 +196,8 @@ updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
     liftIO $ xrrSetCrtcConfig display res cid currentTime x y mid X.xRR_Rotate_0 outputs
 
 updateScreen :: MonadIO m => Xlib.Display -> X.Window -> (Int, Int, Int, Int) -> m ()
-updateScreen display root (width, height, widthInMillimeters, heightInMillimeters) =
+updateScreen display root dim@(width, height, widthInMillimeters, heightInMillimeters) = do
+    liftIO . debugL $ "Updating screen dimensions: " ++ show dim
     liftIO $ xrrSetScreenSize display root (fromIntegral width) (fromIntegral height) (fromIntegral widthInMillimeters) (fromIntegral heightInMillimeters)
 
 calculateScreenDimensions :: Setup -> (Int, Int, Int, Int)
@@ -339,14 +342,16 @@ data Failure = NoSuchOutput String
              | UnableToDeterminePreferredMode Output
              deriving Show
 
-data SetupDifference = SetupDifference { setupDifferenceEnable :: [OutputId]
+data SetupDifference = SetupDifference { setupDifferenceDesiredSetup :: DesiredSetup
+                                       , setupDifferenceEnable :: [OutputId]
                                        , setupDifferenceDisable :: [OutputId]
                                        } deriving Show
 
 compareDesiredSetup :: Setup -> DesiredSetup -> Either String SetupDifference
 compareDesiredSetup setup desired = do
     requiredOutputs <- requiredOutputsE
-    return $ SetupDifference { setupDifferenceEnable = requiredOutputs
+    return $ SetupDifference { setupDifferenceDesiredSetup = desired
+                             , setupDifferenceEnable = requiredOutputs
                              , setupDifferenceDisable = (allOutputIds \\ requiredOutputs) `intersect` enabledOutputs
                              }
         where requiredOutputsE = sequence $ map requireOutput (desiredSetupOutputs desired)
@@ -386,18 +391,18 @@ doSwitcheroo = do
         selectedSetup = listToMaybe . rights $ desiredSetups
 
     case selectedSetup of
-      Just desiredSetup -> do
+      Just difference -> do
           _ <- (flip runStateT) initialSetup . runExceptT $ do
-              infoL $ "Selecting: " ++ show desiredSetup
-              outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable desiredSetup)
+              infoL $ "Selecting: " ++ show difference
+              outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable difference)
               leftest <- topLeft $ head outputsToEnable
               foldM_ (\left right -> right `rightOfMonitor` left) leftest (tail outputsToEnable)
 
-              outputsToDisable <- sequence $ map lookupOutputE (setupDifferenceDisable desiredSetup)
+              outputsToDisable <- sequence $ map lookupOutputE (setupDifferenceDisable difference)
               mapM_ disable outputsToDisable
 
               result <- get >>= applyChanges display root res initialSetup
-              debugL $ "Applied changes: " ++ show result
+              debugL $ "Successfully applied changes"
           return ()
       Nothing -> do
           errorL $ "No desired setups present: " ++ show desiredSetups
