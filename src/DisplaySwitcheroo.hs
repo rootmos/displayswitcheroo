@@ -1,6 +1,10 @@
 {-# LANGUAGE FlexibleContexts, ImpredicativeTypes, ExistentialQuantification #-}
 module DisplaySwitcheroo
     ( doSwitcheroo
+    , topLeft
+    , rightOf
+    , sameAs
+    , findOutputE
     ) where
 
 import DisplaySwitcheroo.Config
@@ -14,11 +18,6 @@ import Graphics.X11.Xlib.Extras ( currentTime, none )
 import Graphics.X11.Xrandr
 import qualified Graphics.X11.Types as X
 import qualified Graphics.X11.Xlib.Types as Xlib
-import Control.Monad ( liftM
-                     , forM
-                     , forM_
-                     , foldM_
-                     )
 import Data.Maybe ( catMaybes
                   , listToMaybe
                   )
@@ -26,14 +25,12 @@ import Data.List ( unzip4
                  , find
                  , intersect
                  , (\\)
-                 , partition
                  )
 import Data.Either ( rights )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
 import Control.Monad.State.Strict
 import Control.Monad.Except
-import Data.Bifunctor ( bimap )
 import Text.Printf ( printf )
 
 
@@ -201,10 +198,8 @@ updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid
                                              , monitorMode = Just (Mode { modeId = ModeId mid })
                                              }) = do
     liftIO . debugL $ "Updating monitor: " ++ show monitor
-    Just prevConfig <- liftIO $ xrrGetCrtcInfo display res cid
     let x = fromIntegral $ monitorX monitor
         y = fromIntegral $ monitorY monitor
-        rot = xrr_ci_rotations prevConfig
         outputs = map (\(OutputId i) -> i) $ monitorOutputs monitor
 
     liftIO $ xrrSetCrtcConfig display res cid currentTime x y mid X.xRR_Rotate_0 outputs
@@ -264,7 +259,7 @@ freeMonitor output = get >>= \Setup { setupMonitors = monitors } ->
             map (flip M.lookup $ monitors) (outputMonitors output)
 
 rightOf :: (MonadError Failure m, MonadState Setup m) => Output -> Output -> m Monitor
-output `rightOf` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
+_ `rightOf` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
 output `rightOf` (Output { outputMonitor = Just mid }) = do
     monitor <- lookupMonitorE mid
     output `rightOfMonitor` monitor
@@ -310,7 +305,7 @@ output `sameAsMonitor` existingMonitor = do
     return modifiedMonitor
 
 sameAs :: (MonadError Failure m, MonadState Setup m) => Output -> Output -> m Monitor
-output `sameAs` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
+_ `sameAs` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
 output `sameAs` (Output { outputMonitor = Just mid }) = do
     monitor <- lookupMonitorE mid
     output `sameAsMonitor` monitor
@@ -338,16 +333,16 @@ findOutputE :: (MonadError Failure m, MonadState Setup m) => String -> m Output
 findOutputE name = (gets $ findOutput name) >>= maybe (throwError $ NoSuchOutput name) return
 
 lookupMonitor :: MonitorId -> Setup -> Maybe Monitor
-lookupMonitor id = M.lookup id . setupMonitors
+lookupMonitor i = M.lookup i . setupMonitors
 
 lookupMonitorE :: (MonadError Failure m, MonadState Setup m) => MonitorId -> m Monitor
-lookupMonitorE id = (gets $ lookupMonitor id) >>= maybe (throwError $ MonitorNotFound id) return
+lookupMonitorE i = (gets $ lookupMonitor i) >>= maybe (throwError $ MonitorNotFound i) return
 
 lookupOutput :: OutputId -> Setup -> Maybe Output
-lookupOutput id = M.lookup id . setupOutputs
+lookupOutput i = M.lookup i . setupOutputs
 
 lookupOutputE :: (MonadError Failure m, MonadState Setup m) => OutputId -> m Output
-lookupOutputE id = (gets $ lookupOutput id) >>= maybe (throwError $ OutputNotFound id) return
+lookupOutputE i = (gets $ lookupOutput i) >>= maybe (throwError $ OutputNotFound i) return
 
 data Failure = NoSuchOutput String
              | OutputNotFound OutputId
@@ -423,7 +418,7 @@ doSwitcheroo = do
                 [] -> infoL $ "No changes required"
                 _ -> do
                     infoL $ "Selecting: " ++ show difference
-                    result <- get >>= applyChanges display root res initialSetup
+                    _ <- get >>= applyChanges display root res initialSetup
                     debugL $ "Successfully applied changes"
           return ()
       Nothing -> do
