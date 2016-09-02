@@ -14,6 +14,7 @@ module DisplaySwitcheroo
     , compareDesiredSetup 
     , setupDifferenceEnable
     , setupDifferenceDisable
+    , runDisplaySwitcheroo
     ) where
 
 import DisplaySwitcheroo.Config
@@ -147,6 +148,16 @@ isInterlaced mi = testBit (xrr_mi_modeFlags mi) 4
 isDoubleScan :: XRRModeInfo -> Bool
 isDoubleScan mi = testBit (xrr_mi_modeFlags mi) 5
 
+
+data Failure = NoSuchOutput String
+             | OutputNotFound OutputId
+             | MonitorNotFound MonitorId
+             | OutputAlreadyDisabled Output
+             | OutputNotEnabled Output
+             | NoFreeMonitors
+             | UnableToDeterminePreferredMode Output
+             deriving Show
+
 data Setup = Setup { setupOutputs :: M.Map OutputId Output
                    , setupMonitors :: M.Map MonitorId Monitor
                    }
@@ -192,6 +203,12 @@ fetchSetup display res = do
                         , monitorOutputs = map (OutputId . fromIntegral) (xrr_ci_outputs ci)
                         , monitorChanged = False
                         }
+
+data SetupDifference = SetupDifference { setupDifferenceDesiredSetup :: DesiredSetup
+                                       , setupDifferenceEnable :: [OutputId]
+                                       , setupDifferenceDisable :: [OutputId]
+                                       } deriving Show
+
 
 updateMonitor :: MonadIO m => Xlib.Display -> XRRScreenResources -> Monitor -> m X.Status
 updateMonitor display res (monitor @ Monitor { monitorId = MonitorId cid, monitorMode = Nothing }) = do
@@ -348,20 +365,6 @@ lookupOutput i = M.lookup i . setupOutputs
 lookupOutputE :: (MonadError Failure m, MonadState Setup m) => OutputId -> m Output
 lookupOutputE i = (gets $ lookupOutput i) >>= maybe (throwError $ OutputNotFound i) return
 
-data Failure = NoSuchOutput String
-             | OutputNotFound OutputId
-             | MonitorNotFound MonitorId
-             | OutputAlreadyDisabled Output
-             | OutputNotEnabled Output
-             | NoFreeMonitors
-             | UnableToDeterminePreferredMode Output
-             deriving Show
-
-data SetupDifference = SetupDifference { setupDifferenceDesiredSetup :: DesiredSetup
-                                       , setupDifferenceEnable :: [OutputId]
-                                       , setupDifferenceDisable :: [OutputId]
-                                       } deriving Show
-
 compareDesiredSetup :: Setup -> DesiredSetup -> Either String SetupDifference
 compareDesiredSetup setup desired = do
     requiredOutputs <- requiredOutputsE
@@ -393,3 +396,5 @@ applyChanges display root res initialSetup setup = do
 changes :: Setup -> [Monitor]
 changes = filter monitorChanged . M.elems . setupMonitors
 
+runDisplaySwitcheroo :: MonadIO m => Setup -> ExceptT Failure (StateT Setup m) a -> m (Either Failure a, Setup)
+runDisplaySwitcheroo initialSetup = (flip runStateT) initialSetup . runExceptT

@@ -12,7 +12,6 @@ import Graphics.X11.Xrandr
 import Data.Either ( rights )
 import Data.Maybe ( listToMaybe )
 import Control.Monad.State.Strict
-import Control.Monad.Except
 import System.Directory ( getAppUserDataDirectory )
 import Text.Printf
 import System.Process
@@ -36,7 +35,7 @@ main = do
 
     case selectedSetup of
       Just difference -> do
-          _ <- (flip runStateT) initialSetup . runExceptT $ do
+          (result, _) <- runDisplaySwitcheroo initialSetup $ do
               outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable difference)
               leftest <- topLeft $ head outputsToEnable
               foldM_ (\left right -> right `rightOfMonitor` left) leftest (tail outputsToEnable)
@@ -53,7 +52,10 @@ main = do
                     _ <- get >>= applyChanges display root res initialSetup
                     infoL $ "Successfully applied changes"
                     mapM_ (liftIO . runHook) (configPostSwitchHooks config)
-          return ()
+
+          case result of
+            Left e -> errorL $ "Failed to do switcheroo: " ++ show e
+            Right _ -> return ()
       Nothing -> do
           errorL $ "No desired setups present: " ++ show desiredSetups
 
