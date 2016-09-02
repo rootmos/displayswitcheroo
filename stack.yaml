@@ -7,7 +7,7 @@ resolver: lts-6.6
 packages:
   - '.'
   - location:
-      git: git@github.com:rootmos/X11.git
+      git: https://github.com/rootmos/X11.git
       commit: e55007573fdaa555ead87c6a4739532afbd34cab
 
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)

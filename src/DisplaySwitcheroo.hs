@@ -37,7 +37,7 @@ import Data.Bits ( testBit )
 import Control.Monad.State.Strict
 import Control.Monad.Except
 import Text.Printf ( printf )
-
+import Safe
 
 newtype OutputId = OutputId X.RROutput
     deriving ( Show, Eq, Ord )
@@ -61,8 +61,7 @@ isOutputEnabled Output { outputMonitor = Nothing } = False
 isOutputEnabled _ = True
 
 preferredMode :: Output -> Maybe Mode
-preferredMode Output { outputModes = [] } = Nothing
-preferredMode Output { outputModes = modes } = Just $ maximum modes
+preferredMode = maximumMay . outputModes
 
 preferredModeE :: MonadError Failure m => Output -> m Mode
 preferredModeE output = maybe (throwError $ UnableToDeterminePreferredMode output) return $ preferredMode output
@@ -230,16 +229,16 @@ updateScreen display root dim@(width, height, widthInMillimeters, heightInMillim
     liftIO . debugL $ "Updating screen dimensions: " ++ show dim
     liftIO $ xrrSetScreenSize display root (fromIntegral width) (fromIntegral height) (fromIntegral widthInMillimeters) (fromIntegral heightInMillimeters)
 
-calculateScreenDimensions :: Setup -> (Int, Int, Int, Int)
-calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monitors } =
-    (maxX, maxY, maxXmm, maxYmm)
-    where
-        maxX = maximum maxXs
-        maxY = maximum maxYs
-        maxXmm = round $ (fromIntegral maxX) / denX
+calculateScreenDimensions :: Setup -> Maybe (Int, Int, Int, Int)
+calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monitors } = do
+    maxX <- maximumMay maxXs
+    maxY <- maximumMay maxYs
+    denX <- maximumMay denXs
+    denY <- maximumMay denYs
+    let maxXmm = round $ (fromIntegral maxX) / denX
         maxYmm = round $ (fromIntegral maxY) / denY
-        denX = maximum denXs
-        denY = maximum denYs
+    return (maxX, maxY, maxXmm, maxYmm)
+    where
         (maxXs, maxYs, denXs, denYs) = unzip4 . catMaybes $ map considerOutput (M.elems outputs)
         considerOutput :: Output -> Maybe (Int, Int, Float, Float)
         considerOutput output = do
@@ -388,9 +387,10 @@ applyChanges display root res initialSetup setup = do
         modify $ upsertMonitor monitor { monitorChanged = False }
     if dimensionsShrank then (liftIO $ updateScreen display root dimAfter) else return ()
     where
-        dimBefore = calculateScreenDimensions initialSetup
-        dimAfter = calculateScreenDimensions setup
-        dimensionsGrew = dimAfter > dimBefore
+        maybeDimBefore = calculateScreenDimensions initialSetup
+        maybedimAfter = calculateScreenDimensions setup
+        dimensionsGrew = case (dimBefore, dimAfter) of
+                           (None, Just _) -> 
         dimensionsShrank = dimAfter < dimBefore
 
 changes :: Setup -> [Monitor]
