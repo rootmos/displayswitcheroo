@@ -3,6 +3,8 @@
         { "outputs": ["DVI-I-1", "DVI-D-0"] },
         { "outputs": ["DVI-I-1"], "name": "Only left monitor" }
     ],
-    "logging": { "stderr": "debug", "syslog": "info" }
+    "logging": { "stderr": "debug", "syslog": "info" },
+    "preSwitchHooks": ["echo 'Im a pre-hook'"],
+    "postSwitchHooks": ["echo 'Im a post-hook'"]
 }
 

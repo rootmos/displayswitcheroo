@@ -14,6 +14,8 @@ import Data.Maybe ( listToMaybe )
 import Control.Monad.State.Strict
 import Control.Monad.Except
 import System.Directory ( getAppUserDataDirectory )
+import Text.Printf
+import System.Process
 
 configFilePath :: IO FilePath
 configFilePath = getAppUserDataDirectory "config/displayswitcheroo.json"
@@ -44,11 +46,20 @@ main = do
 
               newSetup <- get
               case (changes newSetup) of
-                [] -> infoL $ "No changes required"
+                [] -> debugL $ "No changes required"
                 _ -> do
                     infoL $ "Selecting: " ++ show difference
+                    mapM_ (liftIO . runHook) (configPreSwitchHooks config)
                     _ <- get >>= applyChanges display root res initialSetup
-                    debugL $ "Successfully applied changes"
+                    infoL $ "Successfully applied changes"
+                    mapM_ (liftIO . runHook) (configPostSwitchHooks config)
           return ()
       Nothing -> do
           errorL $ "No desired setups present: " ++ show desiredSetups
+
+runHook :: String -> IO ()
+runHook cmdline = do
+    debugL $ printf "Running hook: [%s]" cmdline
+    (exitCode, stdoutContent, stderrContent) <- readCreateProcessWithExitCode (shell cmdline) ""
+    infoL $ printf "Ran hook: [%s] ExitCode: %s StdOut: [%s] StdErr: [%s]" cmdline (show exitCode) stdoutContent stderrContent
+
