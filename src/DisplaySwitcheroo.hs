@@ -11,7 +11,7 @@ module DisplaySwitcheroo
     , applyChanges
     , disable
     , changes
-    , compareDesiredSetup 
+    , compareDesiredSetup
     , setupDifferenceEnable
     , setupDifferenceDisable
     , runDisplaySwitcheroo
@@ -381,17 +381,29 @@ compareDesiredSetup setup desired = do
 
 applyChanges :: (MonadState Setup m, MonadIO m) => Xlib.Display -> X.Window -> XRRScreenResources -> Setup -> Setup -> m ()
 applyChanges display root res initialSetup setup = do
-    if dimensionsGrew then (liftIO $ updateScreen display root dimAfter) else return ()
+    case (dimensionsGrew, maybeDimAfter) of
+      (True, Just dimAfter) -> liftIO $ updateScreen display root dimAfter
+      (_, Nothing) -> liftIO . warningL $ "Unable to determine needed screen dimensions, can't update screen. Setup: " ++ show setup
+      (_, _) -> return ()
+
     forM_ (changes setup) $ \monitor -> do
-        0 <- liftIO $ updateMonitor display res monitor
-        modify $ upsertMonitor monitor { monitorChanged = False }
-    if dimensionsShrank then (liftIO $ updateScreen display root dimAfter) else return ()
+        status <- liftIO $ updateMonitor display res monitor
+        if status == 0
+           then modify $ upsertMonitor monitor { monitorChanged = False }
+           else liftIO . warningL $ printf "Unable to update monitor. Status: %s Monitor: %s" (show status) (show monitor)
+
+    case (dimensionsShrank, maybeDimAfter) of
+      (True, Just dimAfter) -> liftIO $ updateScreen display root dimAfter
+      _ -> return ()
     where
         maybeDimBefore = calculateScreenDimensions initialSetup
-        maybedimAfter = calculateScreenDimensions setup
-        dimensionsGrew = case (dimBefore, dimAfter) of
-                           (None, Just _) -> 
-        dimensionsShrank = dimAfter < dimBefore
+        maybeDimAfter = calculateScreenDimensions setup
+        dimensionsGrew = case (maybeDimBefore, maybeDimAfter) of
+                           (Nothing, Just _) -> True
+                           (Just _ , Nothing) -> False
+                           (Nothing , Nothing) -> False
+                           (Just b, Just a) -> a >= b
+        dimensionsShrank = not dimensionsGrew
 
 changes :: Setup -> [Monitor]
 changes = filter monitorChanged . M.elems . setupMonitors
