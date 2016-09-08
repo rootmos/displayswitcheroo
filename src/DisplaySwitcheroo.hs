@@ -31,6 +31,7 @@ import Data.List ( unzip4
                  , find
                  , intersect
                  , (\\)
+                 , sortBy
                  )
 import qualified Data.Map.Strict as M
 import Data.Bits ( testBit )
@@ -172,13 +173,16 @@ fetchSetup display res = do
 
     return $ Setup { setupOutputs = outputs, setupMonitors = monitors }
         where
-            rawOutputsM = liftM (M.fromAscList . catMaybes) $ forM (xrr_sr_outputs res) (\oid -> do
+            rawOutputsM = liftM makeMapFromMaybes $ forM (xrr_sr_outputs res) (\oid -> do
                 maybeOi <- xrrGetOutputInfo display res oid
                 return $ ((,) (OutputId oid)) <$> maybeOi)
 
-            rawMonitorsM = liftM (M.fromAscList . catMaybes) $ forM (xrr_sr_crtcs res) (\cid -> do
+            rawMonitorsM = liftM makeMapFromMaybes $ forM (xrr_sr_crtcs res) (\cid -> do
                 maybeCi <- xrrGetCrtcInfo display res cid
                 return $ ((,) (MonitorId cid)) <$> maybeCi)
+
+            makeMapFromMaybes :: Ord k => [Maybe (k, v)] -> M.Map k v
+            makeMapFromMaybes = M.fromAscList . sortBy (\x y -> fst x `compare` fst y) . catMaybes
 
             outputMaker oid oi =
                 Output { outputId = oid
