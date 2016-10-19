@@ -15,6 +15,10 @@ module DisplaySwitcheroo
     , setupDifferenceEnable
     , setupDifferenceDisable
     , runDisplaySwitcheroo
+    , isOutputEnabled
+    , isOutputConnected
+    , isMonitorEnabled
+    , Setup(..)
     ) where
 
 import DisplaySwitcheroo.Config

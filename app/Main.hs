@@ -19,12 +19,20 @@ import Text.Printf
 import System.Process
 import Options.Applicative
 import Control.Concurrent ( threadDelay )
+import qualified Data.Map.Strict as M
 
 configFilePath :: IO FilePath
 configFilePath = getAppUserDataDirectory "config/displayswitcheroo.json"
 
-run :: Config -> Xlib.Display -> X.Window -> IO ()
-run config display root = do
+doInfo :: Config -> Xlib.Display -> X.Window -> IO ()
+doInfo config display root = do
+    Just res <- xrrGetScreenResourcesCurrent display root
+    initialSetup <- fetchSetup display res
+    forM_ (filter isOutputEnabled . M.elems $ setupOutputs initialSetup) $ \output -> do
+        putStrLn . show $ output
+
+doRun :: Config -> Xlib.Display -> X.Window -> IO ()
+doRun config display root = do
     Just res <- xrrGetScreenResourcesCurrent display root
     initialSetup <- fetchSetup display res
 
@@ -63,10 +71,17 @@ runHook cmdline = do
     (exitCode, stdoutContent, stderrContent) <- readCreateProcessWithExitCode (shell cmdline) ""
     infoL $ printf "Ran hook: [%s] ExitCode: %s StdOut: [%s] StdErr: [%s]" cmdline (show exitCode) stdoutContent stderrContent
 
-data Opts = MkOpts { runAsDaemon :: Bool }
+data Opts = MkRunOpts { runAsDaemon :: Bool }
+          | MkInfoOpts
+
+runOptsParser :: Parser Opts
+runOptsParser = MkRunOpts <$> switch ( long "daemon" <> help "Run as a daemon" )
+
+infoOptsParser :: Parser Opts
+infoOptsParser = subparser (command "info" (info (pure MkInfoOpts) idm))
 
 optsParser :: Parser Opts
-optsParser = MkOpts <$> switch ( long "daemon" <> help "Run as a daemon" )
+optsParser = infoOptsParser <|> runOptsParser
 
 main :: IO ()
 main = do
@@ -78,8 +93,10 @@ main = do
     display <- openDisplay ""
     root <- rootWindow display (defaultScreen display)
 
-    case runAsDaemon opts of
-      False -> run config display root
-      True -> forever $ do
-          run config display root
+    case opts of
+      MkRunOpts { runAsDaemon = False } -> doRun config display root
+      MkRunOpts { runAsDaemon = True } -> forever $ do
+          doRun config display root
           threadDelay (3*10^6)
+      MkInfoOpts -> doInfo config display root
+
