@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import DisplaySwitcheroo
@@ -20,16 +21,61 @@ import System.Process
 import Options.Applicative
 import Control.Concurrent ( threadDelay )
 import qualified Data.Map.Strict as M
+import Data.Aeson
+import Data.Aeson.Encode.Pretty ( encodePretty )
+import qualified Data.ByteString.Lazy.Char8 as B8
 
 configFilePath :: IO FilePath
 configFilePath = getAppUserDataDirectory "config/displayswitcheroo.json"
+
+data OutputInfo = MkOutputInfo { outputInfoName :: String
+                               , outputInfoX :: Int
+                               , outputInfoY :: Int
+                               , outputInfoWidth :: Int
+                               , outputInfoHeigth :: Int
+                               , outputInfoRefreshRate :: Double
+                               , outputInfoInterlaced :: Bool
+                               , outputInfoDoubleScan :: Bool
+                               , outputInfoDpiX :: Double
+                               , outputInfoDpiY :: Double
+                               }
+                               deriving ( Show )
+
+instance ToJSON OutputInfo where
+    toJSON oi = object [ "name" .= outputInfoName oi
+                       , "x" .= outputInfoX oi
+                       , "y" .= outputInfoY oi
+                       , "width" .= outputInfoWidth oi
+                       , "height" .= outputInfoHeigth oi
+                       , "dpiX" .= outputInfoDpiX oi
+                       , "dpiY" .= outputInfoDpiY oi
+                       , "refresh_rate" .= outputInfoRefreshRate oi
+                       , "interlaced" .= outputInfoInterlaced oi
+                       , "double_scan" .= outputInfoDoubleScan oi
+                       ]
+
+toOutputInfo :: Setup -> Output -> Maybe OutputInfo
+toOutputInfo setup output = do
+    monitor <- outputMonitor output >>= (flip lookupMonitor) setup
+    mode <- monitorMode monitor
+    return $ MkOutputInfo { outputInfoName = outputName output
+                          , outputInfoX = monitorX monitor
+                          , outputInfoY = monitorY monitor
+                          , outputInfoWidth = monitorWidth monitor
+                          , outputInfoHeigth = monitorHeight monitor
+                          , outputInfoRefreshRate = modeHz mode
+                          , outputInfoInterlaced = modeInterlaced mode
+                          , outputInfoDoubleScan = modeDoubleScan mode
+                          , outputInfoDpiX = dpiX monitor output
+                          , outputInfoDpiY = dpiY monitor output
+                          }
 
 doInfo :: Config -> Xlib.Display -> X.Window -> IO ()
 doInfo config display root = do
     Just res <- xrrGetScreenResourcesCurrent display root
     initialSetup <- fetchSetup display res
-    forM_ (filter isOutputEnabled . M.elems $ setupOutputs initialSetup) $ \output -> do
-        putStrLn . show $ output
+    let enabledOutputs = filter isOutputEnabled . M.elems $ setupOutputs initialSetup
+    B8.putStrLn . encodePretty $ toJSON (map (toOutputInfo initialSetup) enabledOutputs)
 
 doRun :: Config -> Xlib.Display -> X.Window -> IO ()
 doRun config display root = do

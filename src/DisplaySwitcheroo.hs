@@ -19,6 +19,12 @@ module DisplaySwitcheroo
     , isOutputConnected
     , isMonitorEnabled
     , Setup(..)
+    , Output(..)
+    , Monitor(..)
+    , Mode(..)
+    , lookupMonitor
+    , dpiX
+    , dpiY
     ) where
 
 import DisplaySwitcheroo.Config
@@ -254,9 +260,22 @@ calculateScreenDimensions Setup { setupOutputs = outputs, setupMonitors = monito
             monitor <- M.lookup mid monitors
             let mX = monitorX monitor + monitorWidth monitor
                 mY = monitorY monitor + monitorHeight monitor
-                dX = (fromIntegral $ monitorWidth monitor) / (fromIntegral $ outputWidthInMillimeters output)
-                dY = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
+                dX = densityX monitor output
+                dY = densityY monitor output
             return (mX, mY, dX, dY)
+
+
+densityX :: (Num t, Fractional t) => Monitor -> Output -> t
+densityX monitor output = (fromIntegral $ monitorWidth monitor) / (fromIntegral $ outputWidthInMillimeters output)
+
+dpiX :: (Num t, Fractional t) => Monitor -> Output -> t
+dpiX monitor output = (densityX monitor output) * 25.4
+
+densityY :: (Num t, Fractional t) => Monitor -> Output -> t
+densityY monitor output = (fromIntegral $ monitorHeight monitor) / (fromIntegral $ outputHeightInMillimeters output)
+
+dpiY :: (Num t, Fractional t) => Monitor -> Output -> t
+dpiY monitor output = (densityY monitor output) * 25.4
 
 compareAndTagAsChanged :: Monitor -> Monitor -> Monitor
 compareAndTagAsChanged old new = new { monitorChanged = not $ new == old }
