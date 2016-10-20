@@ -70,8 +70,8 @@ toOutputInfo setup output = do
                           , outputInfoDpiY = dpiY monitor output
                           }
 
-doInfo :: Config -> Xlib.Display -> X.Window -> IO ()
-doInfo config display root = do
+doInfo :: Xlib.Display -> X.Window -> IO ()
+doInfo display root = do
     Just res <- xrrGetScreenResourcesCurrent display root
     initialSetup <- fetchSetup display res
     let enabledOutputs = filter isOutputEnabled . M.elems $ setupOutputs initialSetup
@@ -143,6 +143,6 @@ main = do
       MkRunOpts { runAsDaemon = False } -> doRun config display root
       MkRunOpts { runAsDaemon = True } -> forever $ do
           doRun config display root
-          threadDelay (3*10^6)
-      MkInfoOpts -> doInfo config display root
+          threadDelay (3*10^(6 :: Int))
+      MkInfoOpts -> doInfo display root
 
