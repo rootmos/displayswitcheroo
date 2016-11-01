@@ -123,7 +123,7 @@ data Mode = Mode { modeId :: ModeId
 
 instance Ord Mode where
     x `compare` y = (toTuple x) `compare` (toTuple y)
-        where toTuple m = (modeWidth m, modeHeight m, modeHz m, not . modeInterlaced $ m)
+        where toTuple m = (modeWidth m, modeHeight m, not . modeInterlaced $ m, not . modeDoubleScan $ m, modeHz m)
 
 instance Show Mode where
     show mode = printf "%dx%d%s(%.2fHz)" (modeWidth mode) (modeHeight mode) flags (modeHz mode)
