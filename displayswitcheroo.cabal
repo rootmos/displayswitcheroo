@@ -19,7 +19,7 @@ library
                      , DisplaySwitcheroo.Config
                      , DisplaySwitcheroo.Logging
   build-depends:       base >= 4.7 && < 5
-                     , X11 >= 1.6.1.2
+                     , X11 == 0
                      , containers >= 0.5.6.2
                      , mtl >= 2.2.1
                      , aeson >= 0.11.2.0
@@ -36,7 +36,7 @@ executable displayswitcheroo
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   build-depends:       base
                      , displayswitcheroo
-                     , X11 >= 1.6.1.2
+                     , X11 == 0
                      , mtl >= 2.2.1
                      , directory >= 1.2.2.0
                      , process >= 1.2.3.0
