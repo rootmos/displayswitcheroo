@@ -413,16 +413,21 @@ applyChanges display root res initialSetup setup = do
       (_, Nothing) -> liftIO . warningL $ "Unable to determine needed screen dimensions, can't update screen. Setup: " ++ show setup
       (_, _) -> return ()
 
-    forM_ (changes setup) $ \monitor -> do
-        status <- liftIO $ updateMonitor display res monitor
-        if status == 0
-           then modify $ upsertMonitor monitor { monitorChanged = False }
-           else liftIO . warningL $ printf "Unable to update monitor. Status: %s Monitor: %s" (show status) (show monitor)
+    forM_ negativeChanges doMonitorUpdate
 
     case (dimensionsShrank, maybeDimAfter) of
       (True, Just dimAfter) -> liftIO $ updateScreen display root dimAfter
       _ -> return ()
+
+    forM_ positiveChanges doMonitorUpdate
     where
+        doMonitorUpdate monitor = do
+            status <- liftIO $ updateMonitor display res monitor
+            if status == 0
+               then modify $ upsertMonitor monitor { monitorChanged = False }
+               else liftIO . warningL $ printf "Unable to update monitor. Status: %s Monitor: %s" (show status) (show monitor)
+        positiveChanges = filter isMonitorEnabled $ changes setup
+        negativeChanges = filter (not . isMonitorEnabled) $ changes setup
         maybeDimBefore = calculateScreenDimensions initialSetup
         maybeDimAfter = calculateScreenDimensions setup
         dimensionsGrew = case (maybeDimBefore, maybeDimAfter) of
