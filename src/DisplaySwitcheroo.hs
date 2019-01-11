@@ -131,7 +131,7 @@ instance Show Mode where
 
 modeMap :: XRRScreenResources -> M.Map ModeId Mode
 modeMap XRRScreenResources { xrr_sr_modes = modes } =
-    M.fromAscList $ map modeMaker modes
+    M.fromList $ map modeMaker modes
         where
             modeMaker mi =
                 (ModeId (xrr_mi_id mi), Mode { modeId = ModeId (xrr_mi_id mi)
