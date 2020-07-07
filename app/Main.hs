@@ -89,11 +89,12 @@ doRun config display root = do
       Just difference -> do
           (result, _) <- runDisplaySwitcheroo initialSetup $ do
               outputsToEnable <- sequence $ map lookupOutputE (setupDifferenceEnable difference)
-              leftest <- topLeft $ head outputsToEnable
-              foldM_ (\left right -> right `rightOfMonitor` left) leftest (tail outputsToEnable)
+              let mr = desiredSetupMaxResolution $ setupDifferenceDesiredSetup difference
+              leftest <- topLeft mr $ head outputsToEnable
+              _ <- foldM_ (flip $ rightOfMonitor mr) leftest (tail outputsToEnable)
 
               outputsToDisable <- sequence $ map lookupOutputE (setupDifferenceDisable difference)
-              mapM_ disable outputsToDisable
+              _ <- mapM_ disable outputsToDisable
 
               newSetup <- get
               case (changes newSetup) of

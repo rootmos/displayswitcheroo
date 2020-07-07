@@ -14,6 +14,7 @@ module DisplaySwitcheroo
     , compareDesiredSetup
     , setupDifferenceEnable
     , setupDifferenceDisable
+    , setupDifferenceDesiredSetup
     , runDisplaySwitcheroo
     , isOutputEnabled
     , isOutputConnected
@@ -71,11 +72,18 @@ isOutputEnabled :: Output -> Bool
 isOutputEnabled Output { outputMonitor = Nothing } = False
 isOutputEnabled _ = True
 
-preferredMode :: Output -> Maybe Mode
-preferredMode = maximumMay . outputModes
+preferredMode :: Maybe Resolution -> Output -> Maybe Mode
+preferredMode Nothing o = maximumMay $ outputModes o
+preferredMode (Just r) o = maximumMay $ wf . hf $ outputModes o
+  where wf = case resolutionWidth r of
+               Nothing -> id
+               Just w -> filter (\m -> modeWidth m <= w)
+        hf = case resolutionHeight r of
+               Nothing -> id
+               Just h -> filter (\m -> modeHeight m <= h)
 
-preferredModeE :: MonadError Failure m => Output -> m Mode
-preferredModeE output = maybe (throwError $ UnableToDeterminePreferredMode output) return $ preferredMode output
+preferredModeE :: MonadError Failure m => Maybe Resolution -> Output -> m Mode
+preferredModeE r output = maybe (throwError $ UnableToDeterminePreferredMode output) return $ preferredMode r output
 
 newtype MonitorId = MonitorId X.RRCrtc
     deriving ( Show, Eq, Ord )
@@ -280,9 +288,10 @@ dpiY monitor output = (densityY monitor output) * 25.4
 compareAndTagAsChanged :: Monitor -> Monitor -> Monitor
 compareAndTagAsChanged old new = new { monitorChanged = not $ new == old }
 
-rightOfMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
-output `rightOfMonitor` existingMonitor = do
-    mode <- preferredModeE output
+rightOfMonitor :: (MonadError Failure m, MonadState Setup m)
+               => Maybe Resolution -> Output -> Monitor -> m Monitor
+rightOfMonitor r output existingMonitor = do
+    mode <- preferredModeE r output
     monitor <- case output of
       Output { outputMonitor = Nothing } -> freeMonitor output
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
@@ -305,15 +314,15 @@ freeMonitor output = get >>= \Setup { setupMonitors = monitors } ->
         listToMaybe . filter (not . isMonitorEnabled) . catMaybes $
             map (flip M.lookup $ monitors) (outputMonitors output)
 
-rightOf :: (MonadError Failure m, MonadState Setup m) => Output -> Output -> m Monitor
-_ `rightOf` (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
-output `rightOf` (Output { outputMonitor = Just mid }) = do
+rightOf :: (MonadError Failure m, MonadState Setup m) => Maybe Resolution -> Output -> Output -> m Monitor
+rightOf _ _ (existingOutput @ Output { outputMonitor = Nothing }) = throwError $ OutputNotEnabled existingOutput
+rightOf r output (Output { outputMonitor = Just mid }) = do
     monitor <- lookupMonitorE mid
-    output `rightOfMonitor` monitor
+    rightOfMonitor r output monitor
 
-topLeft :: (MonadError Failure m, MonadState Setup m) => Output -> m Monitor
-topLeft output = do
-    mode <- preferredModeE output
+topLeft :: (MonadError Failure m, MonadState Setup m) => Maybe Resolution -> Output -> m Monitor
+topLeft r output = do
+    mode <- preferredModeE r output
     monitor <- case output of
       Output { outputMonitor = Nothing } -> freeMonitor output
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
@@ -332,11 +341,12 @@ topLeft output = do
     return modifiedMonitor
 
 sameAsMonitor :: (MonadError Failure m, MonadState Setup m) => Output -> Monitor -> m Monitor
-output `sameAsMonitor` existingMonitor = do
-    mode <- preferredModeE output
+sameAsMonitor output existingMonitor = do
     monitor <- case output of
       Output { outputMonitor = Nothing } -> freeMonitor output
       Output { outputMonitor = Just mid } -> lookupMonitorE mid
+
+    mode <- maybe (throwError $ UnableToDeterminePreferredMode output) return $ monitorMode existingMonitor
 
     let newMonitor = monitor { monitorMode = Just mode
                              , monitorX = monitorX existingMonitor

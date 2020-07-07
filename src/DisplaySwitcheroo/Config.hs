@@ -2,6 +2,7 @@
 module DisplaySwitcheroo.Config
     ( Config(..)
     , DesiredSetup(..)
+    , Resolution(..)
     , LoggingLevel(..)
     , LoggingConfig(..)
     , loadConfig
@@ -26,13 +27,23 @@ instance FromJSON Config where
         <*> (v .:? "logging" .!= defaultLoggingConfig)
     parseJSON invalid = typeMismatch "Config" invalid
 
+data Resolution = Resolution { resolutionWidth :: Maybe Int
+                             , resolutionHeight :: Maybe Int
+                             }
+                             deriving Show
+
+instance FromJSON Resolution where
+    parseJSON (Object v) = Resolution <$> v .:? "width" <*> v .:? "height"
+    parseJSON invalid = typeMismatch "Resolution" invalid
+
 data DesiredSetup = DesiredSetup { desiredSetupName :: Maybe String
                                  , desiredSetupOutputs :: [String]
+                                 , desiredSetupMaxResolution :: Maybe Resolution
                                  }
                                  deriving Show
 
 instance FromJSON DesiredSetup where
-    parseJSON (Object v) = DesiredSetup <$> v .:? "name" <*> v .: "outputs"
+    parseJSON (Object v) = DesiredSetup <$> v .:? "name" <*> v .: "outputs" <*> v .:? "max"
     parseJSON invalid = typeMismatch "DesiredSetup" invalid
 
 data LoggingLevel = LoggingLevelDebug | LoggingLevelInfo | LoggingLevelWarning | LoggingLevelError | LoggingLevelMute
