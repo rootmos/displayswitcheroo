@@ -29,11 +29,12 @@ instance FromJSON Config where
 
 data Resolution = Resolution { resolutionWidth :: Maybe Int
                              , resolutionHeight :: Maybe Int
+                             , resolutionRefreshRate :: Maybe Double
                              }
                              deriving Show
 
 instance FromJSON Resolution where
-    parseJSON (Object v) = Resolution <$> v .:? "width" <*> v .:? "height"
+    parseJSON (Object v) = Resolution <$> v .:? "width" <*> v .:? "height" <*> v .:? "refreshRate"
     parseJSON invalid = typeMismatch "Resolution" invalid
 
 data DesiredSetup = DesiredSetup { desiredSetupName :: Maybe String

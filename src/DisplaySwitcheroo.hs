@@ -74,13 +74,16 @@ isOutputEnabled _ = True
 
 preferredMode :: Maybe Resolution -> Output -> Maybe Mode
 preferredMode Nothing o = maximumMay $ outputModes o
-preferredMode (Just r) o = maximumMay $ wf . hf $ outputModes o
+preferredMode (Just r) o = maximumMay $ rf . wf . hf $ outputModes o
   where wf = case resolutionWidth r of
                Nothing -> id
                Just w -> filter (\m -> modeWidth m <= w)
         hf = case resolutionHeight r of
                Nothing -> id
                Just h -> filter (\m -> modeHeight m <= h)
+        rf = case resolutionRefreshRate r of
+               Nothing -> id
+               Just f -> filter (\m -> modeHz m <= f)
 
 preferredModeE :: MonadError Failure m => Maybe Resolution -> Output -> m Mode
 preferredModeE r output = maybe (throwError $ UnableToDeterminePreferredMode output) return $ preferredMode r output
