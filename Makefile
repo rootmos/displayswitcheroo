@@ -7,16 +7,11 @@ CFLAGS += -DLOG_LEVEL=LOG_$(LOG_LEVEL)
 run: build
 	./displayswitcheroo
 
-.PHONY: install
-install: build
-	install --strip -D -t $(PREFIX)/bin xhook
-	$(call service, xhook)
-
 .PHONY: build
 build: displayswitcheroo
 
 displayswitcheroo: displayswitcheroo.c r.h
-	$(CC) -o $@ $(CFLAGS) $<
+	$(CC) -o $@ $(CFLAGS) $< -lX11 -lXrandr
 
 .PHONY: clean
 clean:

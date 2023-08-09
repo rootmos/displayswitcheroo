@@ -1,8 +1,39 @@
-// libr 0.2.0 (6cf70e68c571974f136d75bf11866659a15d4a43) (https://github.com/rootmos/libr.git) (2023-08-09T06:52:40+02:00)
-// modules: logging now
+// libr 0.2.0 (6cf70e68c571974f136d75bf11866659a15d4a43) (https://github.com/rootmos/libr.git) (2023-08-09T07:07:53+02:00)
+// modules: fail logging now util
 
 #ifndef LIBR_HEADER
 #define LIBR_HEADER
+
+// libr: fail.h
+
+#define CHECK(res, format, ...) CHECK_NOT(res, -1, format, ##__VA_ARGS__)
+
+#define CHECK_NOT(res, err, format, ...) \
+    CHECK_IF(res == err, format, ##__VA_ARGS__)
+
+#define CHECK_IF(cond, format, ...) do { \
+    if(cond) { \
+        r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
+                   __extension__ __LINE__, 1, \
+                   format "\n", ##__VA_ARGS__); \
+    } \
+} while(0)
+
+#define CHECK_MALLOC(x) CHECK_NOT(x, NULL, "memory allocation failed")
+#define CHECK_MMAP(x) CHECK_NOT(x, MAP_FAILED, "memory mapping failed")
+
+#define failwith(format, ...) \
+    r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
+               __extension__ __LINE__, 0, format "\n", ##__VA_ARGS__)
+
+#define not_implemented() failwith("not implemented")
+
+void r_failwith(const char* const caller,
+                const char* const file,
+                const unsigned int line,
+                const int include_errno,
+                const char* const fmt, ...)
+    __attribute__ ((noreturn, format (printf, 5, 6)));
 
 // libr: logging.h
 
@@ -77,9 +108,54 @@ void r_vlog(int level,
 
 // returns current time formated as compact ISO8601: 20190123T182628Z
 const char* now_iso8601_compact(void);
+
+// libr: util.h
+
+#ifndef LENGTH
+#define LENGTH(xs) (sizeof(xs)/sizeof((xs)[0]))
+#endif
+
+#ifndef LIT
+#define LIT(x) x,sizeof(x)
+#endif
+
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
 #endif // LIBR_HEADER
 
 #ifdef LIBR_IMPLEMENTATION
+
+// libr: fail.c
+
+#include <stdlib.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+void r_failwith(const char* const caller,
+                const char* const file,
+                const unsigned int line,
+                const int include_errno,
+                const char* const fmt, ...)
+{
+    va_list vl;
+    va_start(vl, fmt);
+
+    if(include_errno) {
+        r_log(LOG_ERROR, caller, file, line, "(%s) ", strerror(errno));
+        vfprintf(stderr, fmt, vl);
+    } else {
+        r_vlog(LOG_ERROR, caller, file, line, fmt, vl);
+    }
+    va_end(vl);
+
+    abort();
+}
 
 // libr: logging.c
 
