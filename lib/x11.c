@@ -7,7 +7,7 @@
 #define LIBR_IMPLEMENTATION
 #include "r.h"
 
-#define UDTYPE_CONNECTION "x11_connection"
+#define UDTYPE_CONNECTION "x11"
 
 struct connection {
     Display* dpy;
@@ -15,10 +15,6 @@ struct connection {
     int scr;
     Window root;
 };
-
-/*static int luaR_failwith()*/
-/*{*/
-/*}*/
 
 static int x11_close(lua_State* L)
 {
@@ -41,7 +37,7 @@ static int x11_connect(lua_State* L)
     debug("creating connection %p to %s", con, d);
 
     con->dpy = XOpenDisplay(d);
-    /*if(con->dpy == NULL) failwith("unable to open display");*/
+    if(con->dpy == NULL) luaR_failwith(L, "unable to connect to display %s", d);
 
     con->scr = XDefaultScreen(con->dpy);
     con->root = XRootWindow(con->dpy, con->scr);

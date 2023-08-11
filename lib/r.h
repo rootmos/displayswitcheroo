@@ -1,5 +1,5 @@
-// libr 0.2.0 (6cf70e68c571974f136d75bf11866659a15d4a43) (https://github.com/rootmos/libr.git) (2023-08-11T15:22:20+02:00)
-// modules: logging now
+// libr 0.2.0 (8ce47f97341a793f0a4ba11a4ae46e3c4f37db32) (https://github.com/rootmos/libr.git) (2023-08-11T18:40:09+02:00)
+// modules: logging now lua fail util
 
 #ifndef LIBR_HEADER
 #define LIBR_HEADER
@@ -77,6 +77,100 @@ void r_vlog(int level,
 
 // returns current time formated as compact ISO8601: 20190123T182628Z
 const char* now_iso8601_compact(void);
+
+// libr: lua.h
+
+#include <lua.h>
+
+#define CHECK_LUA(L, err, format, ...) do { \
+    if(err != LUA_OK) { \
+        r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
+                   __extension__ __LINE__, 0, \
+                   format ": %s\n", ##__VA_ARGS__, lua_tostring(L, -1)); \
+    } \
+} while(0)
+
+#define LUA_EXPECT_TYPE(L, t, expected, format, ...) do { \
+    if(t != expected) {\
+        r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
+                   __extension__ __LINE__, 0, \
+                   format ": unexpected type %s (expected %s)\n", \
+                   ##__VA_ARGS__, lua_typename(L, t), \
+                   lua_typename(L, expected)); \
+    } \
+} while(0)
+
+#ifndef LUA_STACK_NEUTRAL_TERM
+#define LUA_STACK_NEUTRAL_TERM __lua_stack_top
+#endif
+
+#define lua_stack_neutral_begin(L) int LUA_STACK_NEUTRAL_TERM = lua_gettop(L)
+#define lua_stack_neutral_end(L) \
+    CHECK_IF(LUA_STACK_NEUTRAL_TERM != lua_gettop(L), \
+             "redundant stack elements present")
+
+#define luaR_failwith(L, format, ...) \
+    r_lua_failwith(L, \
+            __extension__ __FUNCTION__, \
+            __extension__ __FILE__, \
+            __extension__ __LINE__, \
+            format, ##__VA_ARGS__)
+
+void r_lua_failwith(lua_State* L,
+                    const char* const caller,
+                    const char* const file,
+                    const unsigned int line,
+                    const char* const fmt, ...)
+    __attribute__ ((noreturn, format (printf, 5, 6)));
+
+// libr: fail.h
+
+#define CHECK(res, format, ...) CHECK_NOT(res, -1, format, ##__VA_ARGS__)
+
+#define CHECK_NOT(res, err, format, ...) \
+    CHECK_IF(res == err, format, ##__VA_ARGS__)
+
+#define CHECK_IF(cond, format, ...) do { \
+    if(cond) { \
+        r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
+                   __extension__ __LINE__, 1, \
+                   format "\n", ##__VA_ARGS__); \
+    } \
+} while(0)
+
+#define CHECK_MALLOC(x) CHECK_NOT(x, NULL, "memory allocation failed")
+#define CHECK_MMAP(x) CHECK_NOT(x, MAP_FAILED, "memory mapping failed")
+
+#define failwith(format, ...) \
+    r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
+               __extension__ __LINE__, 0, format "\n", ##__VA_ARGS__)
+
+#define not_implemented() failwith("not implemented")
+
+void r_failwith(const char* const caller,
+                const char* const file,
+                const unsigned int line,
+                const int include_errno,
+                const char* const fmt, ...)
+    __attribute__ ((noreturn, format (printf, 5, 6)));
+
+// libr: util.h
+
+#ifndef LENGTH
+#define LENGTH(xs) (sizeof(xs)/sizeof((xs)[0]))
+#endif
+
+#ifndef LIT
+#define LIT(x) x,sizeof(x)
+#endif
+
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
 #endif // LIBR_HEADER
 
 #ifdef LIBR_IMPLEMENTATION
@@ -132,5 +226,74 @@ const char* now_iso8601_compact(void)
     size_t r = strftime(buf, sizeof(buf), "%Y%m%dT%H%M%SZ", gmtime(&t));
     if(r <= 0) abort();
     return buf;
+}
+
+// libr: lua.c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include <lua.h>
+
+void r_lua_failwith(lua_State* L,
+        const char* const caller,
+        const char* const file,
+        const unsigned int line,
+        const char* const fmt, ...)
+{
+
+    size_t N = 1;
+    char* buf;
+    while(1) {
+        buf = alloca(N);
+
+        int r = snprintf(buf, N, "(%s:%d:%s:%s:%u) ", now_iso8601_compact(), getpid(), caller, file, line);
+        if(r >= N) {
+            while(N < r) {
+                N <<= 1;
+            }
+            continue;
+        }
+
+        va_list vl;
+        va_start(vl, fmt);
+
+        r += vsnprintf(buf+r, N-r, fmt, vl);
+        if(r < N) {
+            lua_pushstring(L, buf);
+            lua_error(L); // "This function does a long jump, and therefore never returns [...]."
+        }
+
+        va_end(vl);
+        N <<= 1;
+    }
+}
+
+// libr: fail.c
+
+#include <stdlib.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+void r_failwith(const char* const caller,
+                const char* const file,
+                const unsigned int line,
+                const int include_errno,
+                const char* const fmt, ...)
+{
+    va_list vl;
+    va_start(vl, fmt);
+
+    if(include_errno) {
+        r_log(LOG_ERROR, caller, file, line, "(%s) ", strerror(errno));
+        vfprintf(stderr, fmt, vl);
+    } else {
+        r_vlog(LOG_ERROR, caller, file, line, fmt, vl);
+    }
+    va_end(vl);
+
+    abort();
 }
 #endif // LIBR_IMPLEMENTATION
