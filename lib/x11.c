@@ -27,6 +27,24 @@ static int x11_close(lua_State* L)
     return 0;
 }
 
+static int x11_index(lua_State* L)
+{
+    struct connection* con = luaL_checkudata(L, 1, UDTYPE_CONNECTION);
+    const char* key = luaL_checkstring(L, 2);
+
+    if(strcmp(key, "screen") == 0) {
+        lua_pushinteger(L, con->scr);
+        return 1;
+    } else if(strcmp(key, "root") == 0) {
+        lua_pushinteger(L, con->root);
+        return 1;
+    } else {
+        warning("indexing absent key %p[%s]", con, key);
+        lua_pushnil(L);
+        return 1;
+    }
+}
+
 static int x11_connect(lua_State* L)
 {
     int argc = lua_gettop(L);
@@ -45,6 +63,9 @@ static int x11_connect(lua_State* L)
     if(luaL_newmetatable(L, UDTYPE_CONNECTION)) {
         lua_pushcfunction(L, x11_close);
         lua_setfield(L, -2, "__close");
+
+        lua_pushcfunction(L, x11_index);
+        lua_setfield(L, -2, "__index");
     }
 
     lua_setmetatable(L, -2);
