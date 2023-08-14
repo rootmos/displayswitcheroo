@@ -4,3 +4,7 @@ print(string.format("root: %d", dpy.root))
 print(string.format("screen: %d", dpy.screen))
 print(dpy.foo)
 print(dpy[0])
+
+print(dpy.xrandr.version)
+print(dpy.xrandr.version)
+print(dpy.xrandr.version)

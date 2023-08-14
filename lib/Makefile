@@ -13,6 +13,10 @@ X11_PKG ?= x11
 CFLAGS += $(shell pkg-config --cflags "$(X11_PKG)")
 LDFLAGS += $(shell pkg-config --libs "$(X11_PKG)")
 
+XRANDR_PKG ?= xrandr
+CFLAGS += $(shell pkg-config --cflags "$(XRANDR_PKG)")
+LDFLAGS += $(shell pkg-config --libs "$(XRANDR_PKG)")
+
 .PHONY: all
 all: x11.so
 
