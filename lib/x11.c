@@ -9,6 +9,7 @@
 
 #define UDTYPE_CONNECTION "x11"
 #define UDTYPE_XRANDR "xrandr"
+#define UDTYPE_XRANDR_OUTPUT "xrandr.output"
 
 struct connection {
     Display* dpy;
@@ -25,6 +26,54 @@ struct xrandr {
     int major;
     int minor;
 };
+
+struct output {
+    const char* name;
+    int connection;
+};
+
+static int output_index(lua_State* L)
+{
+    luaR_stack(L);
+    struct output* o = luaL_checkudata(L, 1, UDTYPE_XRANDR_OUTPUT);
+    const char* key = luaL_checkstring(L, 2);
+
+    if(strcmp(key, "name") == 0) {
+        lua_pushstring(L, o->name);
+        luaR_return(L, 1);
+    } else if(strcmp(key, "connected") == 0) {
+        switch(o->connection) {
+            case 0: lua_pushboolean(L, 1); break;
+            case 1: lua_pushboolean(L, 0); break;
+            default: lua_pushnil(L); break;
+        }
+        luaR_return(L, 1);
+    } else {
+        debug("indexing absent key %p[%s]", o, key);
+        lua_pushnil(L);
+        luaR_return(L, 1);
+    }
+}
+
+static int output_mk(lua_State* L, XRROutputInfo* oi)
+{
+    luaR_stack(L);
+
+    struct output* o = lua_newuserdatauv(L, sizeof(*o), 0);
+
+    if(luaL_newmetatable(L, UDTYPE_XRANDR_OUTPUT)) {
+        lua_pushcfunction(L, output_index);
+        lua_setfield(L, -2, "__index");
+    }
+    lua_setmetatable(L, -2);
+
+    o->name = lua_pushstring(L, oi->name);
+    lua_pop(L, 1);
+
+    o->connection = oi->connection;
+
+    luaR_return(L, 1);
+}
 
 static int xrandr_index(lua_State* L)
 {
@@ -66,7 +115,8 @@ static int xrandr_call(lua_State* L)
             failwith("XRRGetOutputInfo(%d) failed", i);
         }
 
-        lua_pushstring(L, oi->name);
+        output_mk(L, oi);
+
         lua_seti(L, -2, i + 1);
     }
 
