@@ -28,6 +28,7 @@ struct xrandr {
 
 static int xrandr_index(lua_State* L)
 {
+    luaR_stack(L);
     struct xrandr* xrandr = luaL_checkudata(L, 1, UDTYPE_XRANDR);
     const char* key = luaL_checkstring(L, 2);
 
@@ -38,16 +39,43 @@ static int xrandr_index(lua_State* L)
             failwith("buffer overflow");
         }
         lua_pushstring(L, buf);
-        return 1;
+        luaR_return(L, 1);
     } else {
         debug("indexing absent key %p[%s]", xrandr, key);
         lua_pushnil(L);
-        return 1;
+        luaR_return(L, 1);
     }
+}
+
+static int xrandr_call(lua_State* L)
+{
+    luaR_stack(L);
+
+    struct xrandr* xrandr = luaL_checkudata(L, 1, UDTYPE_XRANDR);
+
+    XRRScreenResources* res = XRRGetScreenResources(xrandr->con->dpy, xrandr->con->root);
+    if(!res) {
+        failwith("XRRGetScreenResources failed");
+    }
+
+    lua_createtable(L, res->noutput, 0);
+
+    for(int i = 0; i < res->noutput; i++) {
+        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, res->outputs[i]);
+        if(!oi) {
+            failwith("XRRGetOutputInfo(%d) failed", i);
+        }
+
+        lua_pushstring(L, oi->name);
+        lua_seti(L, -2, i + 1);
+    }
+
+    luaR_return(L, 1);
 }
 
 static int x11_xrandr(lua_State* L, struct connection* con)
 {
+    luaR_stack(L);
     if(con->xrandr == NULL) {
         struct xrandr* xrandr = con->xrandr = lua_newuserdatauv(L, sizeof(*xrandr), 0);
         xrandr->con = con;
@@ -60,51 +88,57 @@ static int x11_xrandr(lua_State* L, struct connection* con)
         if(luaL_newmetatable(L, UDTYPE_XRANDR)) {
             lua_pushcfunction(L, xrandr_index);
             lua_setfield(L, -2, "__index");
+
+            lua_pushcfunction(L, xrandr_call);
+            lua_setfield(L, -2, "__call");
         }
         lua_setmetatable(L, -2);
 
         lua_pushvalue(L, -1);
         lua_setiuservalue(L, 1, 1);
-        return 1;
+        luaR_return(L, 1);
     } else {
         lua_getiuservalue(L, 1, 1);
-        return 1;
+        luaR_return(L, 1);
     }
 }
 
 static int x11_close(lua_State* L)
 {
+    luaR_stack(L);
     struct connection* con = luaL_checkudata(L, 1, UDTYPE_CONNECTION);
 
     debug("closing connection %p", con);
 
     XCloseDisplay(con->dpy);
 
-    return 0;
+    luaR_return(L, 0);
 }
 
 static int x11_index(lua_State* L)
 {
+    luaR_stack(L);
     struct connection* con = luaL_checkudata(L, 1, UDTYPE_CONNECTION);
     const char* key = luaL_checkstring(L, 2);
 
     if(strcmp(key, "screen") == 0) {
         lua_pushinteger(L, con->scr);
-        return 1;
+        luaR_return(L, 1);
     } else if(strcmp(key, "root") == 0) {
         lua_pushinteger(L, con->root);
-        return 1;
+        luaR_return(L, 1);
     } else if(strcmp(key, "xrandr") == 0) {
         return x11_xrandr(L, con);
     } else {
         debug("indexing absent key %p[%s]", con, key);
         lua_pushnil(L);
-        return 1;
+        luaR_return(L, 1);
     }
 }
 
 static int x11_connect(lua_State* L)
 {
+    luaR_stack(L);
     int argc = lua_gettop(L);
 
     struct connection* con = lua_newuserdatauv(L, sizeof(struct connection), 1);
@@ -129,17 +163,18 @@ static int x11_connect(lua_State* L)
 
     lua_setmetatable(L, -2);
 
-    return 1;
+    luaR_return(L, 1);
 }
 
 int luaopen_x11(lua_State* L)
 {
     luaL_checkversion(L);
+    luaR_stack(L);
 
     lua_newtable(L);
 
     lua_pushcfunction(L, x11_connect);
     lua_setfield(L, -2, "connect");
 
-    return 1;
+    luaR_return(L, 1);
 }

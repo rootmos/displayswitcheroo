@@ -1,4 +1,4 @@
-// libr 0.2.0 (8ce47f97341a793f0a4ba11a4ae46e3c4f37db32) (https://github.com/rootmos/libr.git) (2023-08-11T18:40:09+02:00)
+// libr 0.2.0 (a53e5686ced7a52fd1b489ef729c394a5c9ed700) (https://github.com/rootmos/libr.git) (2023-08-25T11:41:36+02:00)
 // modules: logging now lua fail util
 
 #ifndef LIBR_HEADER
@@ -100,14 +100,24 @@ const char* now_iso8601_compact(void);
     } \
 } while(0)
 
-#ifndef LUA_STACK_NEUTRAL_TERM
-#define LUA_STACK_NEUTRAL_TERM __lua_stack_top
+#ifndef LUA_STACK_MARKER
+#define LUA_STACK_MARKER __luaR_stack_marker
 #endif
 
-#define lua_stack_neutral_begin(L) int LUA_STACK_NEUTRAL_TERM = lua_gettop(L)
-#define lua_stack_neutral_end(L) \
-    CHECK_IF(LUA_STACK_NEUTRAL_TERM != lua_gettop(L), \
-             "redundant stack elements present")
+#define luaR_stack(L) int LUA_STACK_MARKER = lua_gettop(L)
+#define luaR_stack_expect(L, n) do { \
+    int r = lua_gettop(L) - LUA_STACK_MARKER; \
+    if(r < n) { \
+        failwith("too few stack elements: found %d expected %d", r ,n); \
+    } else if(r > n) { \
+        failwith("too many stack elements: found %d expected %d", r ,n); \
+    } \
+} while(0)
+
+#define luaR_return(L, n) do { \
+    luaR_stack_expect(L, n); \
+    return n; \
+} while(0)
 
 #define luaR_failwith(L, format, ...) \
     r_lua_failwith(L, \
@@ -243,7 +253,7 @@ void r_lua_failwith(lua_State* L,
         const char* const fmt, ...)
 {
 
-    size_t N = 1;
+    size_t N = 256;
     char* buf;
     while(1) {
         buf = alloca(N);

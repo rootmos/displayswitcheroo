@@ -1,4 +1,4 @@
-// libr 0.2.0 (6cf70e68c571974f136d75bf11866659a15d4a43) (https://github.com/rootmos/libr.git) (2023-08-09T07:07:53+02:00)
+// libr 0.2.0 (a53e5686ced7a52fd1b489ef729c394a5c9ed700) (https://github.com/rootmos/libr.git) (2023-08-25T11:41:10+02:00)
 // modules: fail logging now util
 
 #ifndef LIBR_HEADER
