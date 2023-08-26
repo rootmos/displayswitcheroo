@@ -29,54 +29,6 @@ struct xrandr {
     int minor;
 };
 
-struct output {
-    const char* name;
-    int connection;
-};
-
-static int output_index(lua_State* L)
-{
-    luaR_stack(L);
-    struct output* o = luaL_checkudata(L, 1, UDTYPE_XRANDR_OUTPUT);
-    const char* key = luaL_checkstring(L, 2);
-
-    if(strcmp(key, "name") == 0) {
-        lua_pushstring(L, o->name);
-        luaR_return(L, 1);
-    } else if(strcmp(key, "connected") == 0) {
-        switch(o->connection) {
-            case 0: lua_pushboolean(L, 1); break;
-            case 1: lua_pushboolean(L, 0); break;
-            default: lua_pushnil(L); break;
-        }
-        luaR_return(L, 1);
-    } else {
-        debug("indexing absent key %p[%s]", o, key);
-        lua_pushnil(L);
-        luaR_return(L, 1);
-    }
-}
-
-static int output_mk(lua_State* L, XRROutputInfo* oi)
-{
-    luaR_stack(L);
-
-    struct output* o = lua_newuserdatauv(L, sizeof(*o), 0);
-
-    if(luaL_newmetatable(L, UDTYPE_XRANDR_OUTPUT)) {
-        lua_pushcfunction(L, output_index);
-        lua_setfield(L, -2, "__index");
-    }
-    lua_setmetatable(L, -2);
-
-    o->name = lua_pushstring(L, oi->name);
-    lua_pop(L, 1);
-
-    o->connection = oi->connection;
-
-    luaR_return(L, 1);
-}
-
 #define set_int(f, i) do { \
     lua_pushliteral(L, f); \
     lua_pushinteger(L, i); \
@@ -88,6 +40,32 @@ static int output_mk(lua_State* L, XRROutputInfo* oi)
     lua_pushboolean(L, b); \
     lua_settable(L, -3); \
 } while(0)
+
+static int output_mk(lua_State* L, XRROutputInfo* oi)
+{
+    luaR_stack(L);
+
+    lua_pushstring(L, oi->name);
+
+    lua_createtable(L, 0, 9);
+    if(luaL_newmetatable(L, UDTYPE_XRANDR_OUTPUT)) {
+    }
+    lua_setmetatable(L, -2);
+
+    lua_pushliteral(L, "name");
+    lua_pushvalue(L, -3);
+    lua_settable(L, -3);
+
+    lua_pushliteral(L, "connected");
+    switch(oi->connection) {
+        case 0: lua_pushboolean(L, 1); break;
+        case 1: lua_pushboolean(L, 0); break;
+        default: lua_pushnil(L); break;
+    }
+    lua_settable(L, -3);
+
+    luaR_return(L, 2);
+}
 
 static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo* mi)
 {
@@ -145,7 +123,7 @@ static int xrandr_fetch_setup(lua_State* L)
 
     // .outputs
     lua_pushliteral(L, "outputs");
-    lua_createtable(L, res->noutput, 0);
+    lua_createtable(L, 0, res->noutput);
 
     for(int i = 0; i < res->noutput; i++) {
         XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, res->outputs[i]);
@@ -154,8 +132,7 @@ static int xrandr_fetch_setup(lua_State* L)
         }
 
         output_mk(L, oi);
-
-        lua_rawseti(L, -2, i + 1);
+        lua_settable(L, -3);
 
         XRRFreeOutputInfo(oi);
     }
