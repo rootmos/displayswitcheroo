@@ -10,6 +10,7 @@
 #define UDTYPE_CONNECTION "x11"
 #define UDTYPE_XRANDR "xrandr"
 #define UDTYPE_XRANDR_OUTPUT "xrandr.output"
+#define UDTYPE_XRANDR_SETUP "xrandr.setup"
 
 struct connection {
     Display* dpy;
@@ -75,6 +76,47 @@ static int output_mk(lua_State* L, XRROutputInfo* oi)
     luaR_return(L, 1);
 }
 
+static int xrandr_fetch_setup(lua_State* L)
+{
+    luaR_stack(L);
+    struct xrandr* xrandr = luaL_checkudata(L, 1, UDTYPE_XRANDR);
+
+    lua_createtable(L, 0, 2);
+
+    if(luaL_newmetatable(L, UDTYPE_XRANDR_SETUP)) {
+    }
+    lua_setmetatable(L, -2);
+
+    XRRScreenResources* res = XRRGetScreenResources(xrandr->con->dpy, xrandr->con->root);
+    if(!res) {
+        failwith("XRRGetScreenResources failed");
+    }
+
+    // .outputs
+    lua_pushliteral(L, "outputs");
+    lua_createtable(L, res->noutput, 0);
+
+    for(int i = 0; i < res->noutput; i++) {
+        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, res->outputs[i]);
+        if(!oi) {
+            failwith("XRRGetOutputInfo(%d) failed", i);
+        }
+
+        output_mk(L, oi);
+
+        lua_rawseti(L, -2, i + 1);
+
+        XRRFreeOutputInfo(oi);
+    }
+
+    lua_settable(L, -3);
+
+    XRRFreeScreenResources(res);
+
+    luaR_return(L, 1);
+}
+
+
 static int xrandr_index(lua_State* L)
 {
     luaR_stack(L);
@@ -89,6 +131,9 @@ static int xrandr_index(lua_State* L)
         }
         lua_pushstring(L, buf);
         luaR_return(L, 1);
+    } else if(strcmp(key, "fetch") == 0) {
+        lua_pushcfunction(L, xrandr_fetch_setup);
+        luaR_return(L, 1);
     } else {
         debug("indexing absent key %p[%s]", xrandr, key);
         lua_pushnil(L);
@@ -98,29 +143,7 @@ static int xrandr_index(lua_State* L)
 
 static int xrandr_call(lua_State* L)
 {
-    luaR_stack(L);
-
-    struct xrandr* xrandr = luaL_checkudata(L, 1, UDTYPE_XRANDR);
-
-    XRRScreenResources* res = XRRGetScreenResources(xrandr->con->dpy, xrandr->con->root);
-    if(!res) {
-        failwith("XRRGetScreenResources failed");
-    }
-
-    lua_createtable(L, res->noutput, 0);
-
-    for(int i = 0; i < res->noutput; i++) {
-        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, res->outputs[i]);
-        if(!oi) {
-            failwith("XRRGetOutputInfo(%d) failed", i);
-        }
-
-        output_mk(L, oi);
-
-        lua_seti(L, -2, i + 1);
-    }
-
-    luaR_return(L, 1);
+    return xrandr_fetch_setup(L);
 }
 
 static int x11_xrandr(lua_State* L, struct connection* con)
