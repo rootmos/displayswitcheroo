@@ -11,6 +11,7 @@
 #define UDTYPE_XRANDR "xrandr"
 #define UDTYPE_XRANDR_OUTPUT "xrandr.output"
 #define UDTYPE_XRANDR_SETUP "xrandr.setup"
+#define UDTYPE_XRANDR_MONITOR "xrandr.monitor"
 
 struct connection {
     Display* dpy;
@@ -76,6 +77,28 @@ static int output_mk(lua_State* L, XRROutputInfo* oi)
     luaR_return(L, 1);
 }
 
+static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo* mi)
+{
+    luaR_stack(L);
+
+    lua_createtable(L, 0, 1);
+
+    if(luaL_newmetatable(L, UDTYPE_XRANDR_MONITOR)) {
+    }
+    lua_setmetatable(L, -2);
+
+    lua_pushliteral(L, "name");
+    char* name = XGetAtomName(xrandr->con->dpy, mi->name);
+    if(!name) {
+        failwith("XGetAtomName(%ld)", mi->name);
+    }
+    lua_pushstring(L, name);
+    XFree(name);
+    lua_settable(L, -3);
+
+    luaR_return(L, 1);
+}
+
 static int xrandr_fetch_setup(lua_State* L)
 {
     luaR_stack(L);
@@ -111,6 +134,24 @@ static int xrandr_fetch_setup(lua_State* L)
 
     lua_settable(L, -3);
 
+    // .monitors
+    int nmonitors;
+    XRRMonitorInfo* mi = XRRGetMonitors(xrandr->con->dpy, xrandr->con->root, False, &nmonitors);
+    if(!mi) {
+        failwith("XRRGetMonitors failed");
+    }
+
+    lua_pushliteral(L, "monitors");
+    lua_createtable(L, nmonitors, 0);
+
+    for(int i = 0; i < nmonitors; i++) {
+        monitor_mk(L, xrandr, &mi[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+
+    lua_settable(L, -3);
+
+    XRRFreeMonitors(mi);
     XRRFreeScreenResources(res);
 
     luaR_return(L, 1);

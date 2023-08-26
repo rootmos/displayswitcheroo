@@ -8,3 +8,7 @@ local setup = dpy.xrandr:fetch();
 for i, o in ipairs(setup.outputs) do
     print(string.format("output %s: connected=%s", o.name, o.connected))
 end
+
+for i, m in ipairs(setup.monitors) do
+    print(string.format("monitor %s", m.name))
+end
