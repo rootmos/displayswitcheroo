@@ -77,12 +77,6 @@ static int output_mk(lua_State* L, XRROutputInfo* oi)
     luaR_return(L, 1);
 }
 
-#define set_str(f, s) do { \
-    lua_pushliteral(L, f); \
-    lua_pushstring(L, s); \
-    lua_settable(L, -3); \
-} while(0)
-
 #define set_int(f, i) do { \
     lua_pushliteral(L, f); \
     lua_pushinteger(L, i); \
@@ -99,17 +93,21 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo*
 {
     luaR_stack(L);
 
-    lua_createtable(L, 0, 1);
+    char* name = XGetAtomName(xrandr->con->dpy, mi->name);
+    if(!name) {
+        failwith("XGetAtomName(%ld)", mi->name);
+    }
+    lua_pushstring(L, name);
+
+    lua_createtable(L, 0, 9);
 
     if(luaL_newmetatable(L, UDTYPE_XRANDR_MONITOR)) {
     }
     lua_setmetatable(L, -2);
 
-    char* name = XGetAtomName(xrandr->con->dpy, mi->name);
-    if(!name) {
-        failwith("XGetAtomName(%ld)", mi->name);
-    }
-    set_str("name", name);
+    lua_pushliteral(L, "name");
+    lua_pushvalue(L, -3);
+    lua_settable(L, -3);
 
     if(mi->noutput > 0) {
         set_bool("active", 1);
@@ -126,7 +124,7 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo*
 
     set_bool("primary", mi->primary);
 
-    luaR_return(L, 1);
+    luaR_return(L, 2);
 }
 
 static int xrandr_fetch_setup(lua_State* L)
@@ -172,11 +170,11 @@ static int xrandr_fetch_setup(lua_State* L)
     }
 
     lua_pushliteral(L, "monitors");
-    lua_createtable(L, nmonitors, 0);
+    lua_createtable(L, 0, nmonitors);
 
     for(int i = 0; i < nmonitors; i++) {
         monitor_mk(L, xrandr, &mi[i]);
-        lua_rawseti(L, -2, i + 1);
+        lua_settable(L, -3);
     }
 
     lua_settable(L, -3);

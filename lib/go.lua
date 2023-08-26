@@ -9,9 +9,10 @@ for i, o in ipairs(setup.outputs) do
     print(string.format("output %s: connected=%s", o.name, o.connected))
 end
 
-for i, m in ipairs(setup.monitors) do
+for n, m in pairs(setup.monitors) do
+    assert(n == m.name)
     print(string.format("monitor %s: %s%s%dx%d+%d+%d (%dmm x %dmm)",
-            m.name,
+            n,
             m.active and "active " or "",
             m.primary and "primary " or "",
             m.width, m.height, m.x, m.y, m.mwidth, m.mheight))
