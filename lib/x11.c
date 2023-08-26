@@ -77,6 +77,24 @@ static int output_mk(lua_State* L, XRROutputInfo* oi)
     luaR_return(L, 1);
 }
 
+#define set_str(f, s) do { \
+    lua_pushliteral(L, f); \
+    lua_pushstring(L, s); \
+    lua_settable(L, -3); \
+} while(0)
+
+#define set_int(f, i) do { \
+    lua_pushliteral(L, f); \
+    lua_pushinteger(L, i); \
+    lua_settable(L, -3); \
+} while(0)
+
+#define set_bool(f, b) do { \
+    lua_pushliteral(L, f); \
+    lua_pushboolean(L, b); \
+    lua_settable(L, -3); \
+} while(0)
+
 static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo* mi)
 {
     luaR_stack(L);
@@ -87,14 +105,26 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo*
     }
     lua_setmetatable(L, -2);
 
-    lua_pushliteral(L, "name");
     char* name = XGetAtomName(xrandr->con->dpy, mi->name);
     if(!name) {
         failwith("XGetAtomName(%ld)", mi->name);
     }
-    lua_pushstring(L, name);
-    XFree(name);
-    lua_settable(L, -3);
+    set_str("name", name);
+
+    if(mi->noutput > 0) {
+        set_bool("active", 1);
+
+        set_int("x", mi->x);
+        set_int("y", mi->y);
+        set_int("width", mi->width);
+        set_int("height", mi->height);
+        set_int("mheight", mi->mheight);
+        set_int("mwidth", mi->mwidth);
+    } else {
+        set_bool("active", 0);
+    }
+
+    set_bool("primary", mi->primary);
 
     luaR_return(L, 1);
 }
