@@ -29,19 +29,7 @@ struct xrandr {
     int minor;
 };
 
-#define set_int(f, i) do { \
-    lua_pushliteral(L, f); \
-    lua_pushinteger(L, i); \
-    lua_settable(L, -3); \
-} while(0)
-
-#define set_bool(f, b) do { \
-    lua_pushliteral(L, f); \
-    lua_pushboolean(L, b); \
-    lua_settable(L, -3); \
-} while(0)
-
-static int output_mk(lua_State* L, XRROutputInfo* oi)
+static int output_mk(lua_State* L, RROutput xid, XRROutputInfo* oi)
 {
     luaR_stack(L);
 
@@ -52,22 +40,23 @@ static int output_mk(lua_State* L, XRROutputInfo* oi)
     }
     lua_setmetatable(L, -2);
 
-    lua_pushliteral(L, "name");
-    lua_pushvalue(L, -3);
-    lua_settable(L, -3);
+    lua_pushvalue(L, -2);
+    lua_setfield(L, -2, "name");
 
-    lua_pushliteral(L, "connected");
     switch(oi->connection) {
         case 0: lua_pushboolean(L, 1); break;
         case 1: lua_pushboolean(L, 0); break;
         default: lua_pushnil(L); break;
     }
-    lua_settable(L, -3);
+    lua_setfield(L, -2, "connected");
+
+    lua_pushinteger(L, xid);
+    lua_setfield(L, -2, "xid");
 
     luaR_return(L, 2);
 }
 
-static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo* mi)
+static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, const XRRMonitorInfo* mi)
 {
     luaR_stack(L);
 
@@ -83,24 +72,59 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, const XRRMonitorInfo*
     }
     lua_setmetatable(L, -2);
 
-    lua_pushliteral(L, "name");
-    lua_pushvalue(L, -3);
-    lua_settable(L, -3);
+    lua_pushvalue(L, -2);
+    lua_setfield(L, -2, "name");
 
     if(mi->noutput > 0) {
-        set_bool("active", 1);
+        lua_pushboolean(L, 1);
+        lua_setfield(L, -2, "active");
 
-        set_int("x", mi->x);
-        set_int("y", mi->y);
-        set_int("width", mi->width);
-        set_int("height", mi->height);
-        set_int("mheight", mi->mheight);
-        set_int("mwidth", mi->mwidth);
+        lua_pushinteger(L, mi->x);
+        lua_setfield(L, -2, "x");
+
+        lua_pushinteger(L, mi->y);
+        lua_setfield(L, -2, "y");
+
+        lua_pushinteger(L, mi->width);
+        lua_setfield(L, -2, "width");
+
+        lua_pushinteger(L, mi->height);
+        lua_setfield(L, -2, "height");
+
+        lua_pushinteger(L, mi->mheight);
+        lua_setfield(L, -2, "mheight");
+
+        lua_pushinteger(L, mi->mwidth);
+        lua_setfield(L, -2, "mwidth");
+
+        lua_createtable(L, mi->noutput, 0);
+        for(int i = 0; i < mi->noutput; i++) {
+            const RROutput oid = mi->outputs[i];
+
+            lua_pushnil(L);
+            while(lua_next(L, output_index - 4) != 0) {
+                if(lua_getfield(L, -1, "xid") != LUA_TNUMBER) {
+                    failwith("unexpected type");
+                }
+                lua_Integer xid = lua_tointeger(L, -1);
+                if(oid == xid) {
+                    lua_pop(L, 1);
+                    lua_rawseti(L, -3, i + 1);
+                    lua_pop(L, 1);
+                    break;
+                } else {
+                    lua_pop(L, 2);
+                }
+            }
+        }
+        lua_setfield(L, -2, "outputs");
     } else {
-        set_bool("active", 0);
+        lua_pushboolean(L, 0);
+        lua_setfield(L, -2, "active");
     }
 
-    set_bool("primary", mi->primary);
+    lua_pushboolean(L, mi->primary);
+    lua_setfield(L, -2, "primary");
 
     luaR_return(L, 2);
 }
@@ -122,22 +146,23 @@ static int xrandr_fetch_setup(lua_State* L)
     }
 
     // .outputs
-    lua_pushliteral(L, "outputs");
     lua_createtable(L, 0, res->noutput);
+    lua_pushvalue(L, -1);
 
     for(int i = 0; i < res->noutput; i++) {
-        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, res->outputs[i]);
+        RROutput xid = res->outputs[i];
+        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, xid);
         if(!oi) {
-            failwith("XRRGetOutputInfo(%d) failed", i);
+            failwith("XRRGetOutputInfo(%lu) failed", xid);
         }
 
-        output_mk(L, oi);
+        output_mk(L, xid, oi);
         lua_settable(L, -3);
 
         XRRFreeOutputInfo(oi);
     }
 
-    lua_settable(L, -3);
+    lua_setfield(L, -3, "outputs");
 
     // .monitors
     int nmonitors;
@@ -146,15 +171,15 @@ static int xrandr_fetch_setup(lua_State* L)
         failwith("XRRGetMonitors failed");
     }
 
-    lua_pushliteral(L, "monitors");
     lua_createtable(L, 0, nmonitors);
 
     for(int i = 0; i < nmonitors; i++) {
-        monitor_mk(L, xrandr, &mi[i]);
+        monitor_mk(L, xrandr, -2, &mi[i]);
         lua_settable(L, -3);
     }
 
-    lua_settable(L, -3);
+    lua_setfield(L, -3, "monitors");
+    lua_pop(L, 1);
 
     XRRFreeMonitors(mi);
     XRRFreeScreenResources(res);

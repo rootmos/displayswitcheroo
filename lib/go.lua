@@ -17,4 +17,8 @@ for n, m in pairs(setup.monitors) do
             m.active and "active " or "",
             m.primary and "primary " or "",
             m.width, m.height, m.x, m.y, m.mwidth, m.mheight))
+
+    for _, o in ipairs(m.outputs) do
+        print(string.format("  output %s", o.name))
+    end
 end
