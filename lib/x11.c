@@ -12,6 +12,7 @@
 #define UDTYPE_XRANDR_OUTPUT "xrandr.output"
 #define UDTYPE_XRANDR_SETUP "xrandr.setup"
 #define UDTYPE_XRANDR_MONITOR "xrandr.monitor"
+#define UDTYPE_XRANDR_MODE "xrandr.mode"
 
 struct connection {
     Display* dpy;
@@ -66,7 +67,7 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
     }
     lua_pushstring(L, name);
 
-    lua_createtable(L, 0, 9);
+    lua_createtable(L, 0, 10);
 
     if(luaL_newmetatable(L, UDTYPE_XRANDR_MONITOR)) {
     }
@@ -129,6 +130,31 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
     luaR_return(L, 2);
 }
 
+static int mode_mk(lua_State* L, const XRRModeInfo* mi)
+{
+    luaR_stack(L);
+
+    lua_pushinteger(L, mi->id);
+
+    lua_createtable(L, 0, 0);
+
+    if(luaL_newmetatable(L, UDTYPE_XRANDR_MODE)) {
+    }
+    lua_setmetatable(L, -2);
+
+    lua_pushvalue(L, -2);
+    lua_setfield(L, -2, "xid");
+
+    lua_pushinteger(L, mi->width);
+    lua_setfield(L, -2, "width");
+    lua_pushinteger(L, mi->height);
+    lua_setfield(L, -2, "height");
+
+    debug("%s: %lu", mi->name, mi->dotClock);
+
+    luaR_return(L, 2);
+}
+
 static int xrandr_fetch_setup(lua_State* L)
 {
     luaR_stack(L);
@@ -144,6 +170,14 @@ static int xrandr_fetch_setup(lua_State* L)
     if(!res) {
         failwith("XRRGetScreenResources failed");
     }
+
+    // .modes
+    lua_createtable(L, 0, res->nmode);
+    for(int i = 0; i < res->nmode; i++) {
+        mode_mk(L, &res->modes[i]);
+        lua_settable(L, -3);
+    }
+    lua_setfield(L, -2, "modes");
 
     // .outputs
     lua_createtable(L, 0, res->noutput);
