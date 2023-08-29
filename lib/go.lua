@@ -7,7 +7,7 @@ print(string.format("xrandr: %s", dpy.xrandr.version))
 local setup = dpy.xrandr:fetch();
 
 for _, m in pairs(setup.modes) do
-    print(string.format("%dx%d", m.width, m.height))
+    print(string.format("%dx%d %f", m.width, m.height, m.refresh_rate))
 end
 
 for n, o in pairs(setup.outputs) do

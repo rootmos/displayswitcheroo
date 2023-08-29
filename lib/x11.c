@@ -45,8 +45,9 @@ static int output_mk(lua_State* L, RROutput xid, XRROutputInfo* oi)
     lua_setfield(L, -2, "name");
 
     switch(oi->connection) {
-        case 0: lua_pushboolean(L, 1); break;
-        case 1: lua_pushboolean(L, 0); break;
+        case RR_Connected: lua_pushboolean(L, 1); break;
+        case RR_Disconnected: lua_pushboolean(L, 0); break;
+        case RR_UnknownConnection:
         default: lua_pushnil(L); break;
     }
     lua_setfield(L, -2, "connected");
@@ -130,6 +131,28 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
     luaR_return(L, 2);
 }
 
+static void figure_out_and_push_refresh_rate(lua_State* L, const XRRModeInfo* mi)
+{
+    // https://cgit.freedesktop.org/xorg/app/xrandr/tree/xrandr.c?h=xrandr-1.5.2#n553
+    
+    if(!mi->hTotal || !mi->vTotal) {
+        lua_pushnil(L);
+        return;
+    }
+
+    lua_Number q = 1.0;
+
+    if(mi->modeFlags & RR_DoubleScan) {
+        q *= 2;
+    }
+
+    if(mi->modeFlags & RR_Interlace) {
+        q /= 2;
+    }
+
+    lua_pushnumber(L, (lua_Number)mi->dotClock / (q * (lua_Number)mi->hTotal * (lua_Number)mi->vTotal));
+}
+
 static int mode_mk(lua_State* L, const XRRModeInfo* mi)
 {
     luaR_stack(L);
@@ -150,7 +173,15 @@ static int mode_mk(lua_State* L, const XRRModeInfo* mi)
     lua_pushinteger(L, mi->height);
     lua_setfield(L, -2, "height");
 
-    debug("%s: %lu", mi->name, mi->dotClock);
+    lua_pushinteger(L, mi->dotClock);
+    lua_setfield(L, -2, "dotclock");
+    lua_pushinteger(L, mi->hTotal);
+    lua_setfield(L, -2, "htotal");
+    lua_pushinteger(L, mi->vTotal);
+    lua_setfield(L, -2, "vtotal");
+
+    figure_out_and_push_refresh_rate(L, mi);
+    lua_setfield(L, -2, "refresh_rate");
 
     luaR_return(L, 2);
 }
