@@ -134,7 +134,7 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
 static void figure_out_and_push_refresh_rate(lua_State* L, const XRRModeInfo* mi)
 {
     // https://cgit.freedesktop.org/xorg/app/xrandr/tree/xrandr.c?h=xrandr-1.5.2#n553
-    
+
     if(!mi->hTotal || !mi->vTotal) {
         lua_pushnil(L);
         return;
@@ -159,14 +159,14 @@ static int mode_mk(lua_State* L, const XRRModeInfo* mi)
 
     lua_pushinteger(L, mi->id);
 
-    lua_createtable(L, 0, 0);
+    lua_createtable(L, 0, 11);
 
     if(luaL_newmetatable(L, UDTYPE_XRANDR_MODE)) {
     }
     lua_setmetatable(L, -2);
 
     lua_pushvalue(L, -2);
-    lua_setfield(L, -2, "xid");
+    lua_setfield(L, -2, "id");
 
     lua_pushinteger(L, mi->width);
     lua_setfield(L, -2, "width");
@@ -182,6 +182,43 @@ static int mode_mk(lua_State* L, const XRRModeInfo* mi)
 
     figure_out_and_push_refresh_rate(L, mi);
     lua_setfield(L, -2, "refresh_rate");
+
+    // mode flags
+    XRRModeFlags flags = mi->modeFlags;
+
+    if((flags & RR_HSyncPositive) && !(flags & RR_HSyncNegative)) {
+        lua_pushinteger(L, 1);
+    } else if(!(flags & RR_HSyncPositive) && (flags & RR_HSyncNegative)) {
+        lua_pushinteger(L, -1);
+    } else {
+        debug("mode %lu does not specify hsync sign", mi->id);
+        lua_pushnil(L);
+    }
+    flags &= ~(RR_HSyncPositive | RR_HSyncNegative);
+    lua_setfield(L, -2, "hsync_sign");
+
+    if((flags & RR_VSyncPositive) && !(flags & RR_VSyncNegative)) {
+        lua_pushinteger(L, 1);
+    } else if(!(flags & RR_VSyncPositive) && (flags & RR_VSyncNegative)) {
+        lua_pushinteger(L, -1);
+    } else {
+        debug("mode %lu does not specify vsync sign", mi->id);
+        lua_pushnil(L);
+    }
+    flags &= ~(RR_VSyncPositive | RR_VSyncNegative);
+    lua_setfield(L, -2, "vsync_sign");
+
+    lua_pushboolean(L, flags & RR_Interlace ? 1 : 0);
+    flags &= ~RR_Interlace;
+    lua_setfield(L, -2, "interlace");
+
+    lua_pushboolean(L, flags & RR_DoubleScan ? 1 : 0);
+    flags &= ~RR_DoubleScan;
+    lua_setfield(L, -2, "double_scan");
+
+    if(flags != 0) {
+        warning("mode %lu has unexpected flags: %ld", mi->id, flags);
+    }
 
     luaR_return(L, 2);
 }
