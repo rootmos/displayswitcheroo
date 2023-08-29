@@ -6,13 +6,13 @@ print(string.format("xrandr: %s", dpy.xrandr.version))
 
 local setup = dpy.xrandr:fetch();
 
-for _, m in pairs(setup.modes) do
-    print(string.format("%dx%d %f", m.width, m.height, m.refresh_rate))
-end
-
 for n, o in pairs(setup.outputs) do
     assert(n == o.name)
     print(string.format("output %s: connected=%s", n, o.connected))
+
+    for _, m in pairs(o.modes) do
+        print(string.format("  %dx%d %f", m.width, m.height, m.refresh_rate))
+    end
 end
 
 for n, m in pairs(setup.monitors) do

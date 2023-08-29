@@ -30,13 +30,13 @@ struct xrandr {
     int minor;
 };
 
-static int output_mk(lua_State* L, RROutput xid, XRROutputInfo* oi)
+static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* oi)
 {
     luaR_stack(L);
 
     lua_pushstring(L, oi->name);
 
-    lua_createtable(L, 0, 9);
+    lua_createtable(L, 0, 4);
     if(luaL_newmetatable(L, UDTYPE_XRANDR_OUTPUT)) {
     }
     lua_setmetatable(L, -2);
@@ -52,8 +52,22 @@ static int output_mk(lua_State* L, RROutput xid, XRROutputInfo* oi)
     }
     lua_setfield(L, -2, "connected");
 
-    lua_pushinteger(L, xid);
-    lua_setfield(L, -2, "xid");
+    lua_pushinteger(L, id);
+    lua_setfield(L, -2, "id");
+
+    // modes
+
+    lua_createtable(L, oi->nmode, 0);
+    for(int i = 0; i < oi->nmode; i++) {
+        RRMode m = oi->modes[i];
+        lua_pushinteger(L, m);
+        int t = lua_rawget(L, modes_index - 4);
+        if(t != LUA_TTABLE) {
+            failwith("unexpected type for mode %lu: %s", m, lua_typename(L, t));
+        }
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_setfield(L, -2, "modes");
 
     luaR_return(L, 2);
 }
@@ -105,7 +119,7 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
 
             lua_pushnil(L);
             while(lua_next(L, output_index - 4) != 0) {
-                if(lua_getfield(L, -1, "xid") != LUA_TNUMBER) {
+                if(lua_getfield(L, -1, "id") != LUA_TNUMBER) {
                     failwith("unexpected type");
                 }
                 lua_Integer xid = lua_tointeger(L, -1);
@@ -228,7 +242,7 @@ static int xrandr_fetch_setup(lua_State* L)
     luaR_stack(L);
     struct xrandr* xrandr = luaL_checkudata(L, 1, UDTYPE_XRANDR);
 
-    lua_createtable(L, 0, 2);
+    lua_createtable(L, 0, 2); // stack: setup
 
     if(luaL_newmetatable(L, UDTYPE_XRANDR_SETUP)) {
     }
@@ -240,16 +254,17 @@ static int xrandr_fetch_setup(lua_State* L)
     }
 
     // .modes
-    lua_createtable(L, 0, res->nmode);
+    lua_createtable(L, 0, res->nmode); // stack: modes setup
+    lua_pushvalue(L, -1); // stack: modes modes setup
     for(int i = 0; i < res->nmode; i++) {
-        mode_mk(L, &res->modes[i]);
-        lua_settable(L, -3);
+        mode_mk(L, &res->modes[i]); // stack: k v modes modes setup
+        lua_settable(L, -3); // stack: modes modes setup
     }
-    lua_setfield(L, -2, "modes");
+    lua_setfield(L, -3, "modes"); // stack: modes setup
 
     // .outputs
-    lua_createtable(L, 0, res->noutput);
-    lua_pushvalue(L, -1);
+    lua_createtable(L, 0, res->noutput); // stack: outputs modes setup
+    lua_pushvalue(L, -1); // stack: outputs outputs modes setup
 
     for(int i = 0; i < res->noutput; i++) {
         RROutput xid = res->outputs[i];
@@ -258,13 +273,13 @@ static int xrandr_fetch_setup(lua_State* L)
             failwith("XRRGetOutputInfo(%lu) failed", xid);
         }
 
-        output_mk(L, xid, oi);
-        lua_settable(L, -3);
+        output_mk(L, -3, xid, oi); // stack: k v outputs outputs modes setup
+        lua_settable(L, -3); // stack: outputs outputs modes setup
 
         XRRFreeOutputInfo(oi);
     }
 
-    lua_setfield(L, -3, "outputs");
+    lua_setfield(L, -4, "outputs"); // stack: outputs modes setup
 
     // .monitors
     int nmonitors;
@@ -273,15 +288,15 @@ static int xrandr_fetch_setup(lua_State* L)
         failwith("XRRGetMonitors failed");
     }
 
-    lua_createtable(L, 0, nmonitors);
+    lua_createtable(L, 0, nmonitors); // stack: monitors outputs modes setup
 
     for(int i = 0; i < nmonitors; i++) {
-        monitor_mk(L, xrandr, -2, &mi[i]);
-        lua_settable(L, -3);
+        monitor_mk(L, xrandr, -2, &mi[i]); // stack: k v monitors outputs modes setup
+        lua_settable(L, -3); // stack: k v monitors outputs modes setup
     }
 
-    lua_setfield(L, -3, "monitors");
-    lua_pop(L, 1);
+    lua_setfield(L, -4, "monitors"); // stack: outputs modes setup
+    lua_pop(L, 2); // stack: setup
 
     XRRFreeMonitors(mi);
     XRRFreeScreenResources(res);
