@@ -10,8 +10,12 @@ for n, o in pairs(setup.outputs) do
     assert(n == o.name)
     print(string.format("output %s: connected=%s", n, o.connected))
 
-    for _, m in pairs(o.modes) do
-        print(string.format("  %dx%d %f", m.width, m.height, m.refresh_rate))
+    for _, m in ipairs(o.modes) do
+        print(string.format("  %dx%d %fHz", m.width, m.height, m.refresh_rate))
+    end
+
+    for _, m in ipairs(o.modes.preferred) do
+        print(string.format(" *%dx%d %fHz", m.width, m.height, m.refresh_rate))
     end
 end
 

@@ -56,17 +56,22 @@ static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* 
     lua_setfield(L, -2, "id");
 
     // modes
-
-    lua_createtable(L, oi->nmode, 0);
+    lua_createtable(L, oi->nmode, 1);
+    lua_createtable(L, oi->npreferred, 0);
     for(int i = 0; i < oi->nmode; i++) {
         RRMode m = oi->modes[i];
         lua_pushinteger(L, m);
-        int t = lua_rawget(L, modes_index - 4);
+        int t = lua_rawget(L, modes_index - 5);
         if(t != LUA_TTABLE) {
             failwith("unexpected type for mode %lu: %s", m, lua_typename(L, t));
         }
-        lua_rawseti(L, -2, i + 1);
+        if(i < oi->npreferred) {
+            lua_pushvalue(L, -1);
+            lua_rawseti(L, -3, i + 1);
+        }
+        lua_rawseti(L, -3, i + 1);
     }
+    lua_setfield(L, -2, "preferred");
     lua_setfield(L, -2, "modes");
 
     luaR_return(L, 2);
