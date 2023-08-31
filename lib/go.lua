@@ -28,3 +28,13 @@ for n, m in pairs(setup.monitors) do
         print(string.format("  output %s", o.name))
     end
 end
+
+for i, c in ipairs(setup.crtcs) do
+    assert(i == c.index + 1)
+    if c.enabled then
+        print(string.format("crtc %d: %dx%d+%d+%d", c.index,
+            c.width, c.height, c.x, c.y))
+    else
+        print(string.format("crtc %d", c.index))
+    end
+end
