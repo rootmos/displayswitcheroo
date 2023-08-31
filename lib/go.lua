@@ -11,11 +11,8 @@ for n, o in pairs(setup.outputs) do
     print(string.format("output %s: connected=%s", n, o.connected))
 
     for _, m in ipairs(o.modes) do
-        print(string.format("  %dx%d %fHz", m.width, m.height, m.refresh_rate))
-    end
-
-    for _, m in ipairs(o.modes.preferred) do
-        print(string.format(" *%dx%d %fHz", m.width, m.height, m.refresh_rate))
+        local p = o.modes:is_preferred(m) and "+" or " "
+        print(string.format(" %s%dx%d %fHz", p, m.width, m.height, m.refresh_rate))
     end
 end
 

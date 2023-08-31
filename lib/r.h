@@ -1,4 +1,4 @@
-// libr 0.2.0 (a53e5686ced7a52fd1b489ef729c394a5c9ed700) (https://github.com/rootmos/libr.git) (2023-08-25T11:41:36+02:00)
+// libr 0.2.0 (b006e2eaf847df7c816030d8f2bfbee7fa0de225) (https://github.com/rootmos/libr.git) (2023-08-31T07:12:21+02:00)
 // modules: logging now lua fail util
 
 #ifndef LIBR_HEADER
@@ -133,6 +133,9 @@ void r_lua_failwith(lua_State* L,
                     const char* const fmt, ...)
     __attribute__ ((noreturn, format (printf, 5, 6)));
 
+int luaR_testmetatable(lua_State* L, int arg, const char* tname);
+void luaR_checkmetatable(lua_State* L, int arg, const char* tname);
+
 // libr: fail.h
 
 #define CHECK(res, format, ...) CHECK_NOT(res, -1, format, ##__VA_ARGS__)
@@ -245,12 +248,13 @@ const char* now_iso8601_compact(void)
 #include <unistd.h>
 
 #include <lua.h>
+#include <lauxlib.h>
 
 void r_lua_failwith(lua_State* L,
-        const char* const caller,
-        const char* const file,
-        const unsigned int line,
-        const char* const fmt, ...)
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const char* const fmt, ...)
 {
 
     size_t N = 256;
@@ -278,6 +282,22 @@ void r_lua_failwith(lua_State* L,
         va_end(vl);
         N <<= 1;
     }
+}
+
+int luaR_testmetatable(lua_State* L, int arg, const char* tname)
+{
+    if(lua_getmetatable(L, arg)) {
+        luaL_getmetatable(L, tname);
+        int r = lua_rawequal(L, -1, -2);
+        lua_pop(L, 2);
+        return r;
+    }
+    return 0;
+}
+
+void luaR_checkmetatable(lua_State* L, int arg, const char* tname)
+{
+    luaL_argexpected(L, luaR_testmetatable(L, arg, tname), arg, tname);
 }
 
 // libr: fail.c

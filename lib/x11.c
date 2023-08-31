@@ -7,12 +7,13 @@
 #define LIBR_IMPLEMENTATION
 #include "r.h"
 
-#define UDTYPE_CONNECTION "x11"
-#define UDTYPE_XRANDR "xrandr"
-#define UDTYPE_XRANDR_OUTPUT "xrandr.output"
-#define UDTYPE_XRANDR_SETUP "xrandr.setup"
-#define UDTYPE_XRANDR_MONITOR "xrandr.monitor"
-#define UDTYPE_XRANDR_MODE "xrandr.mode"
+#define TYPE_CONNECTION "x11"
+#define TYPE_XRANDR "xrandr"
+#define TYPE_XRANDR_OUTPUT "xrandr.output"
+#define TYPE_XRANDR_OUTPUT_MODES "xrandr.output.modes"
+#define TYPE_XRANDR_SETUP "xrandr.setup"
+#define TYPE_XRANDR_MONITOR "xrandr.monitor"
+#define TYPE_XRANDR_MODE "xrandr.mode"
 
 struct connection {
     Display* dpy;
@@ -30,6 +31,42 @@ struct xrandr {
     int minor;
 };
 
+static int modes_is_preferred(lua_State* L)
+{
+    luaR_stack(L);
+
+    luaR_checkmetatable(L, 1, TYPE_XRANDR_OUTPUT_MODES);
+    luaR_checkmetatable(L, 2, TYPE_XRANDR_MODE);
+
+    if(lua_getfield(L, 2, "id") != LUA_TNUMBER) {
+        failwith("id field not present");
+    }
+
+    if(lua_getfield(L, 1, "preferred") != LUA_TTABLE) {
+        failwith("preferred field not present");
+    }
+
+    lua_pushnil(L);
+    while(lua_next(L, -2) != 0) {
+        if(lua_getfield(L, -1, "id") != LUA_TNUMBER) {
+            failwith("id field not present");
+        }
+        int r = lua_rawequal(L, -1, -5);
+        if(r) {
+            lua_pop(L, 5);
+            lua_pushboolean(L, 1);
+            luaR_return(L, 1);
+        } else {
+            lua_pop(L, 2);
+        }
+    }
+
+    lua_pop(L, 2);
+
+    lua_pushboolean(L, 0);
+    luaR_return(L, 1);
+}
+
 static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* oi)
 {
     luaR_stack(L);
@@ -37,7 +74,7 @@ static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* 
     lua_pushstring(L, oi->name);
 
     lua_createtable(L, 0, 4);
-    if(luaL_newmetatable(L, UDTYPE_XRANDR_OUTPUT)) {
+    if(luaL_newmetatable(L, TYPE_XRANDR_OUTPUT)) {
     }
     lua_setmetatable(L, -2);
 
@@ -56,8 +93,22 @@ static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* 
     lua_setfield(L, -2, "id");
 
     // modes
-    lua_createtable(L, oi->nmode, 1);
+    lua_createtable(L, oi->nmode, 2);
+
+    if(luaL_newmetatable(L, TYPE_XRANDR_OUTPUT_MODES)) {
+        luaL_Reg l[] = {
+            { "is_preferred", modes_is_preferred },
+            { NULL, NULL },
+        };
+        luaL_newlibtable(L, l);
+        luaL_setfuncs(L, l, 0);
+
+        lua_setfield(L, -2, "__index");
+    }
+    lua_setmetatable(L, -2);
+
     lua_createtable(L, oi->npreferred, 0);
+
     for(int i = 0; i < oi->nmode; i++) {
         RRMode m = oi->modes[i];
         lua_pushinteger(L, m);
@@ -71,6 +122,7 @@ static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* 
         }
         lua_rawseti(L, -3, i + 1);
     }
+
     lua_setfield(L, -2, "preferred");
     lua_setfield(L, -2, "modes");
 
@@ -89,7 +141,7 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
 
     lua_createtable(L, 0, 10);
 
-    if(luaL_newmetatable(L, UDTYPE_XRANDR_MONITOR)) {
+    if(luaL_newmetatable(L, TYPE_XRANDR_MONITOR)) {
     }
     lua_setmetatable(L, -2);
 
@@ -180,7 +232,7 @@ static int mode_mk(lua_State* L, const XRRModeInfo* mi)
 
     lua_createtable(L, 0, 11);
 
-    if(luaL_newmetatable(L, UDTYPE_XRANDR_MODE)) {
+    if(luaL_newmetatable(L, TYPE_XRANDR_MODE)) {
     }
     lua_setmetatable(L, -2);
 
@@ -245,11 +297,11 @@ static int mode_mk(lua_State* L, const XRRModeInfo* mi)
 static int xrandr_fetch_setup(lua_State* L)
 {
     luaR_stack(L);
-    struct xrandr* xrandr = luaL_checkudata(L, 1, UDTYPE_XRANDR);
+    struct xrandr* xrandr = luaL_checkudata(L, 1, TYPE_XRANDR);
 
     lua_createtable(L, 0, 2); // stack: setup
 
-    if(luaL_newmetatable(L, UDTYPE_XRANDR_SETUP)) {
+    if(luaL_newmetatable(L, TYPE_XRANDR_SETUP)) {
     }
     lua_setmetatable(L, -2);
 
@@ -313,7 +365,7 @@ static int xrandr_fetch_setup(lua_State* L)
 static int xrandr_index(lua_State* L)
 {
     luaR_stack(L);
-    struct xrandr* xrandr = luaL_checkudata(L, 1, UDTYPE_XRANDR);
+    struct xrandr* xrandr = luaL_checkudata(L, 1, TYPE_XRANDR);
     const char* key = luaL_checkstring(L, 2);
 
     if(strcmp(key, "version") == 0) {
@@ -351,7 +403,7 @@ static int x11_xrandr(lua_State* L, struct connection* con)
         }
         debug("Xrandr version: %d.%d", xrandr->major, xrandr->minor);
 
-        if(luaL_newmetatable(L, UDTYPE_XRANDR)) {
+        if(luaL_newmetatable(L, TYPE_XRANDR)) {
             lua_pushcfunction(L, xrandr_index);
             lua_setfield(L, -2, "__index");
 
@@ -372,7 +424,7 @@ static int x11_xrandr(lua_State* L, struct connection* con)
 static int x11_close(lua_State* L)
 {
     luaR_stack(L);
-    struct connection* con = luaL_checkudata(L, 1, UDTYPE_CONNECTION);
+    struct connection* con = luaL_checkudata(L, 1, TYPE_CONNECTION);
 
     debug("closing connection %p", con);
 
@@ -384,7 +436,7 @@ static int x11_close(lua_State* L)
 static int x11_index(lua_State* L)
 {
     luaR_stack(L);
-    struct connection* con = luaL_checkudata(L, 1, UDTYPE_CONNECTION);
+    struct connection* con = luaL_checkudata(L, 1, TYPE_CONNECTION);
     const char* key = luaL_checkstring(L, 2);
 
     if(strcmp(key, "screen") == 0) {
@@ -419,7 +471,7 @@ static int x11_connect(lua_State* L)
     con->scr = XDefaultScreen(con->dpy);
     con->root = XRootWindow(con->dpy, con->scr);
 
-    if(luaL_newmetatable(L, UDTYPE_CONNECTION)) {
+    if(luaL_newmetatable(L, TYPE_CONNECTION)) {
         lua_pushcfunction(L, x11_close);
         lua_setfield(L, -2, "__close");
 
