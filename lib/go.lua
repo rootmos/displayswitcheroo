@@ -39,4 +39,12 @@ for i, c in ipairs(setup.crtcs) do
     else
         print(string.format("crtc %d", c.index))
     end
+
+    for _, o in ipairs(c.outputs) do
+        print(string.format("  connected output %s", o))
+    end
+
+    for _, o in ipairs(c.outputs.possible) do
+        print(string.format("  possible output %s", o))
+    end
 end

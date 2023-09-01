@@ -36,7 +36,7 @@ static int crtc_mk(lua_State* L, int modes_index, RRCrtc id, XRRCrtcInfo* ci)
 {
     luaR_stack(L);
 
-    lua_createtable(L, 0, 1);
+    lua_createtable(L, 0, 8);
 
     if(luaL_newmetatable(L, TYPE_XRANDR_CRTC)) {
     }
@@ -85,6 +85,23 @@ static int crtc_mk(lua_State* L, int modes_index, RRCrtc id, XRRCrtcInfo* ci)
         lua_pushboolean(L, 0);
         lua_setfield(L, -2, "enabled");
     }
+
+    // outputs
+    lua_createtable(L, ci->noutput, 1);
+    for(int i = 0; i < ci->noutput; i++) {
+        lua_pushinteger(L, ci->outputs[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+
+    lua_createtable(L, ci->npossible, 0);
+    for(int i = 0; i < ci->npossible; i++) {
+        lua_pushinteger(L, ci->possible[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_setfield(L, -2, "possible");
+
+    lua_setfield(L, -2, "outputs");
+
 
     luaR_return(L, 1);
 }
