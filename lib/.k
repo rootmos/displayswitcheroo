@@ -1,5 +1,9 @@
+cli() {
+    make LOG_LEVEL=DEBUG cli.exe && ./cli.exe
+}
+
 go() {
-    make LOG_LEVEL=DEBUG && lua go.lua
+    make LOG_LEVEL=DEBUG x11.so && lua go.lua
 }
 
 libr() {

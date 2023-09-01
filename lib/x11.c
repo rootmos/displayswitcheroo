@@ -1,11 +1,13 @@
+#include <string.h>
+
 #include <lua.h>
 #include <lauxlib.h>
 
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
 
-#define LIBR_IMPLEMENTATION
 #include "r.h"
+#include "x11.h"
 
 #define TYPE_CONNECTION "x11"
 #define TYPE_XRANDR "xrandr"
