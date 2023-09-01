@@ -32,7 +32,7 @@ struct xrandr {
     int minor;
 };
 
-static int crtc_mk(lua_State* L, RRCrtc id, XRRCrtcInfo* ci)
+static int crtc_mk(lua_State* L, int modes_index, RRCrtc id, XRRCrtcInfo* ci)
 {
     luaR_stack(L);
 
@@ -60,6 +60,27 @@ static int crtc_mk(lua_State* L, RRCrtc id, XRRCrtcInfo* ci)
 
         lua_pushinteger(L, ci->height);
         lua_setfield(L, -2, "height");
+
+        lua_pushnil(L);
+        while(lua_next(L, modes_index - 2) != 0) {
+            if(lua_getfield(L, -1, "id") != LUA_TNUMBER) {
+                failwith("unexpected type");
+            }
+            int r;
+            lua_Integer mode_id = lua_tointegerx(L, -1, &r);
+            if(!r) {
+                failwith("unable to fetch id");
+            }
+            lua_pop(L, 1);
+
+            if(mode_id == ci->mode) {
+                lua_setfield(L, -3, "mode");
+                lua_pop(L, 1);
+                break;
+            } else {
+                lua_pop(L, 1);
+            }
+        }
     } else {
         lua_pushboolean(L, 0);
         lua_setfield(L, -2, "enabled");
@@ -104,7 +125,7 @@ static int modes_is_preferred(lua_State* L)
     luaR_return(L, 1);
 }
 
-static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* oi)
+static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id, XRROutputInfo* oi)
 {
     luaR_stack(L);
 
@@ -162,6 +183,27 @@ static int output_mk(lua_State* L, int modes_index, RROutput id, XRROutputInfo* 
 
     lua_setfield(L, -2, "preferred");
     lua_setfield(L, -2, "modes");
+
+    // crtc
+    lua_pushnil(L);
+    while(lua_next(L, crtcs_index - 3) != 0) {
+        if(lua_getfield(L, -1, "id") != LUA_TNUMBER) {
+            failwith("unexpected type");
+        }
+        int r;
+        lua_Integer crtc_id = lua_tointegerx(L, -1, &r);
+        if(!r) {
+            failwith("unable to fetch id");
+        }
+        lua_pop(L, 1);
+
+        if(crtc_id == oi->crtc) {
+            lua_pushvalue(L, -1);
+            lua_setfield(L, -4, "crtc");
+        }
+
+        lua_pop(L, 1);
+    }
 
     luaR_return(L, 2);
 }
@@ -331,25 +373,28 @@ static int mode_mk(lua_State* L, const XRRModeInfo* mi)
     luaR_return(L, 2);
 }
 
-static int setup_mk_crtcs(lua_State* L, struct xrandr* xrandr, XRRScreenResources* res)
+static int setup_mk_crtcs(lua_State* L, struct xrandr* xrandr, XRRScreenResources* res, int setup_index)
 {
     luaR_stack(L);
 
     lua_createtable(L, res->ncrtc, 0);
+    lua_getfield(L, setup_index - 1, "modes");
 
     for(int i = 0; i < res->ncrtc; i++) {
         RRCrtc id = res->crtcs[i];
         XRRCrtcInfo* ci = XRRGetCrtcInfo(xrandr->con->dpy, res, id);
 
-        crtc_mk(L, id, ci);
+        crtc_mk(L, -1, id, ci);
 
         lua_pushinteger(L, i);
         lua_setfield(L, -2, "index");
 
-        lua_rawseti(L, -2, i + 1);
+        lua_rawseti(L, -3, i + 1);
 
         XRRFreeCrtcInfo(ci);
     }
+
+    lua_pop(L, 1);
 
     luaR_return(L, 1);
 }
@@ -372,22 +417,23 @@ static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResour
     luaR_stack(L);
 
     lua_createtable(L, 0, res->noutput);
-    lua_getfield(L, setup_index - 1, "modes");
+    lua_getfield(L, setup_index - 1, "crtcs");
+    lua_getfield(L, setup_index - 2, "modes");
 
     for(int i = 0; i < res->noutput; i++) {
-        RROutput xid = res->outputs[i];
-        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, xid);
+        RROutput id = res->outputs[i];
+        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, id);
         if(!oi) {
-            failwith("XRRGetOutputInfo(%lu) failed", xid);
+            failwith("XRRGetOutputInfo(%lu) failed", id);
         }
 
-        output_mk(L, -1, xid, oi);
-        lua_settable(L, -4);
+        output_mk(L, -1, -2, id, oi);
+        lua_settable(L, -5);
 
         XRRFreeOutputInfo(oi);
     }
 
-    lua_pop(L, 1);
+    lua_pop(L, 2);
 
     luaR_return(L, 1);
 }
@@ -433,11 +479,11 @@ static int xrandr_fetch_setup(lua_State* L)
         failwith("XRRGetScreenResources failed");
     }
 
-    setup_mk_crtcs(L, xrandr, res);
-    lua_setfield(L, -2, "crtcs");
-
     setup_mk_modes(L, res);
     lua_setfield(L, -2, "modes");
+
+    setup_mk_crtcs(L, xrandr, res, -1);
+    lua_setfield(L, -2, "crtcs");
 
     setup_mk_outputs(L, xrandr, res, -1);
     lua_setfield(L, -2, "outputs");
