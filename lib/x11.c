@@ -224,9 +224,7 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
             failwith("unexpected type");
         }
 
-        int i = 1;
-        while(lua_rawgeti(L, -1, i) != LUA_TNIL) {
-            int t = lua_type(L, -1);
+        for(int i = 1, t = lua_rawgeti(L, -1, i); t != LUA_TNIL; lua_pop(L, 1), t = lua_rawgeti(L, -1, ++i)) {
             if(t == LUA_TNUMBER) {
                 lua_Integer id0 = lua_tointeger(L, -1);
                 if(id == id0) {
@@ -234,9 +232,6 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
                     lua_rawseti(L, -3, i);
                 }
             }
-
-            lua_pop(L, 1);
-            i += 1;
         }
         lua_pop(L, 1);
 
@@ -245,19 +240,14 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
             failwith("unexpected type");
         }
 
-        i = 1;
-        while(lua_rawgeti(L, -1, i) != LUA_TNIL) {
-            int t = lua_type(L, -1);
+        for(int i = 1, t = lua_rawgeti(L, -1, i); t != LUA_TNIL; lua_pop(L, 1), t = lua_rawgeti(L, -1, ++i)) {
             if(t == LUA_TNUMBER) {
                 lua_Integer id0 = lua_tointeger(L, -1);
                 if(id == id0) {
                     lua_pushvalue(L, -6);
                     lua_rawseti(L, -3, i);
                 }
-
             }
-            lua_pop(L, 1);
-            i += 1;
         }
         lua_pop(L, 1);
 
