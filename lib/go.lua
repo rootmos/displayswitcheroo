@@ -41,10 +41,10 @@ for i, c in ipairs(setup.crtcs) do
     end
 
     for _, o in ipairs(c.outputs) do
-        print(string.format("  connected output %s", o))
+        print(string.format("  connected output %s", o.name))
     end
 
     for _, o in ipairs(c.outputs.possible) do
-        print(string.format("  possible output %s", o))
+        print(string.format("  possible output %s", o.name))
     end
 end

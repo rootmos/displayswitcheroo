@@ -201,7 +201,7 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
     lua_setfield(L, -2, "preferred");
     lua_setfield(L, -2, "modes");
 
-    // crtc
+    // .crtc and fix crtc.outputs
     lua_pushnil(L);
     while(lua_next(L, crtcs_index - 3) != 0) {
         if(lua_getfield(L, -1, "id") != LUA_TNUMBER) {
@@ -218,6 +218,50 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
             lua_pushvalue(L, -1);
             lua_setfield(L, -4, "crtc");
         }
+
+        // fix outputs
+        if(lua_getfield(L, -1, "outputs") != LUA_TTABLE) {
+            failwith("unexpected type");
+        }
+
+        int i = 1;
+        while(lua_rawgeti(L, -1, i) != LUA_TNIL) {
+            int t = lua_type(L, -1);
+            if(t == LUA_TNUMBER) {
+                lua_Integer id0 = lua_tointeger(L, -1);
+                if(id == id0) {
+                    lua_pushvalue(L, -5);
+                    lua_rawseti(L, -3, i);
+                }
+            }
+
+            lua_pop(L, 1);
+            i += 1;
+        }
+        lua_pop(L, 1);
+
+        // fix outputs.possible
+        if(lua_getfield(L, -1, "possible") != LUA_TTABLE) {
+            failwith("unexpected type");
+        }
+
+        i = 1;
+        while(lua_rawgeti(L, -1, i) != LUA_TNIL) {
+            int t = lua_type(L, -1);
+            if(t == LUA_TNUMBER) {
+                lua_Integer id0 = lua_tointeger(L, -1);
+                if(id == id0) {
+                    lua_pushvalue(L, -6);
+                    lua_rawseti(L, -3, i);
+                }
+
+            }
+            lua_pop(L, 1);
+            i += 1;
+        }
+        lua_pop(L, 1);
+
+        lua_pop(L, 2);
 
         lua_pop(L, 1);
     }
