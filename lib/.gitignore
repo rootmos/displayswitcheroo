@@ -1,2 +1,5 @@
+version.c
+version.h
+
 *.exe
 *.so

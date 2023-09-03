@@ -1,6 +1,11 @@
+#include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include "r.h"
+#include "version.h"
 #include "x11.h"
 
 #include <lua.h>
@@ -51,8 +56,55 @@ static int openlibs(lua_State* L)
     luaR_return(L, 0);
 }
 
+struct options {
+    const char* input;
+};
+
+static void print_usage(int fd, const char* progname)
+{
+    dprintf(fd, "usage: %s [OPTION]... [INPUT]\n", progname);
+}
+
+#ifndef PROGNAME
+#define PROGNAME (argv[0])
+#endif
+
+static void parse_options(struct options* o, int argc, char* argv[])
+{
+    memset(o, 0, sizeof(*o));
+
+    int res;
+    while((res = getopt(argc, argv, "hv")) != -1) {
+        switch(res) {
+        case 'v':
+            print_version(PROGNAME);
+            exit(0);
+        case 'h':
+        default:
+            print_usage(res == 'h' ? 1 : 2, PROGNAME);
+            exit(res == 'h' ? 0 : 1);
+        }
+    }
+
+    if(optind < argc) {
+        o->input = argv[optind];
+        info("input: %s", o->input);
+
+        struct stat st;
+        int r = stat(o->input, &st);
+        if(r == -1 && errno == ENOENT) {
+            dprintf(2, "error; unable to access input file: %s\n", o->input);
+            exit(1);
+        }
+        CHECK(r, "stat(%s)", o->input);
+    }
+}
+
 int main(int argc, char* argv[])
 {
+    struct options o;
+    parse_options(&o, argc, argv);
+
     lua_State* L = luaL_newstate();
     CHECK_NOT(L, NULL, "unable to create Lua state");
 

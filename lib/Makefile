@@ -1,9 +1,5 @@
-CC = gcc
-CFLAGS ?= -O1 -Wall -Werror
-LDFLAGS ?=
-
-LOG_LEVEL ?= INFO
-CFLAGS += -DLOG_LEVEL=LOG_$(LOG_LEVEL)
+ROOT := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
+include $(ROOT)/../tools/common.makefile
 
 LUA_PKG ?= lua
 CFLAGS += $(shell pkg-config --cflags "$(LUA_PKG)")
@@ -21,10 +17,10 @@ READLINE_PKG ?= readline
 READLINE_CFLAGS += $(shell pkg-config --cflags "$(READLINE_PKG)")
 READLINE_LDFLAGS += $(shell pkg-config --libs "$(READLINE_PKG)")
 
-.PHONY: all
-all: cli.exe x11.so
+.PHONY: build
+build: cli.exe x11.so
 
-cli.exe: cli.c x11.c r.c
+cli.exe: cli.c x11.c r.c version.c
 	$(CC) $(CFLAGS) $(READLINE_CFLAGS) -o$@ $^ $(LDFLAGS) $(READLINE_LDFLAGS)
 
 x11.so: x11.c r.c
@@ -32,4 +28,4 @@ x11.so: x11.c r.c
 
 .PHONY: clean
 clean:
-	rm -f *.so *.exe
+	rm -f *.so *.exe version.*

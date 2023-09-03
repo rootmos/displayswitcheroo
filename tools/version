@@ -1,0 +1,125 @@
+#!/bin/bash
+
+set -o nounset -o pipefail -o errexit
+
+SCRIPT_DIR=$(readlink -f "$0" | xargs dirname)
+ROOT=${ROOT-$SCRIPT_DIR/..}
+VERSION_FILE=${VERSION_FILE-.version}
+
+ACTION=
+C_IMPL=
+C_HEADER=
+while getopts "c:h:Cip-" OPT; do
+    case $OPT in
+        c) C_IMPL=$OPTARG ;;
+        h) C_HEADER=$OPTARG ;;
+        C) ACTION=compare ;;
+        i) ACTION=i ;;
+        p) ACTION=p ;;
+        -) break ;;
+        ?) exit 2 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "$ACTION" = "i" ]; then
+    echo "$ROOT/$VERSION_FILE"
+    exit 0
+elif [ "$ACTION" = "p" ]; then
+    . <("$SCRIPT_DIR/build-info" -e)
+    echo "$BUILD_VERSION"
+    exit 0
+elif [ "$ACTION" = "compare" ]; then
+    set +o errexit
+    diff -c3 <(git show HEAD^:"$VERSION_FILE") "$ROOT/$VERSION_FILE" 1>&2
+    EC=$?
+    set -o errexit
+    if [ "$EC" -eq 0 ]; then
+       echo 1>&2 "version not updated"
+       exit 1
+    else
+       echo 1>&2 "version has changed"
+       exit 0
+    fi
+fi
+
+TMP=$(mktemp -d)
+trap 'rm -rf $TMP' EXIT
+
+"$SCRIPT_DIR/build-info" -c >"$TMP/build-info.h"
+
+if [ -n "$C_HEADER" ]; then
+    cat <<EOF >>"$TMP/version.h"
+#pragma once
+
+void print_version(const char* prog);
+
+EOF
+    cat < "$TMP/build-info.h" >>"$TMP/version.h"
+    cp "$TMP/version.h" "$C_HEADER"
+fi
+
+lua_version() {
+    cat <<EOF >> "$TMP/version.preamble.c"
+#include <lua.h>
+#include <lauxlib.h>
+EOF
+
+    cat <<EOF >> "$TMP/version.printf.c"
+    printf("lua (compile) %s.%s.%s\\n", LUA_VERSION_MAJOR, LUA_VERSION_MINOR, LUA_VERSION_RELEASE);
+    do {
+        lua_State* L = luaL_newstate();
+        lua_Number v = lua_version(L);
+        printf("lua (runtime) %f\\n", v);
+        lua_close(L);
+    } while(0);
+EOF
+}
+
+readline_version() {
+    cat <<EOF >> "$TMP/version.preamble.c"
+#include <readline/readline.h>
+EOF
+
+    cat <<EOF >> "$TMP/version.printf.c"
+    printf("readline (compile) %d.%d\\n", RL_VERSION_MAJOR, RL_VERSION_MINOR);
+    printf("readline (link) %s\\n", rl_library_version);
+EOF
+}
+
+if [ -n "$C_IMPL" ]; then
+    lua_version
+    readline_version
+
+    cat <<EOF >>"$TMP/version.c"
+#include "version.h"
+
+#include <stdio.h>
+
+EOF
+    cat <"$TMP/version.preamble.c" >>"$TMP/version.c"
+
+    cat <<EOF >>"$TMP/version.c"
+
+void print_version(const char* prog)
+{
+    printf("%s (%s.%s.%s)\\n",
+           prog,
+           BUILD_VERSION_MAJOR,
+           BUILD_VERSION_MINOR,
+           BUILD_VERSION_PATCH);
+    printf("url %s\\n", BUILD_REPO_URL);
+    printf("gitref %s%s\\n", BUILD_GIT_REF, BUILD_GIT_DIRTY[0] ? " (dirty)" : "");
+    printf("buildtime %s\\n", BUILD_TIME);
+
+EOF
+
+    cat <"$TMP/version.printf.c" >>"$TMP/version.c"
+
+
+    cat <<EOF >>"$TMP/version.c"
+}
+EOF
+
+    cp "$TMP/version.c" "$C_IMPL"
+fi
