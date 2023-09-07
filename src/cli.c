@@ -74,17 +74,16 @@ static void run_repl(lua_State* L)
             return;
         }
 
-        debug("input: %s", input);
-
         if(input[0]) {
+            debug("input: %s", input);
             add_history(input);
-        }
 
-        int r = luaL_dostring(L, input);
-        if(r != LUA_OK) {
-            const char* msg = lua_tostring(L, -1);
-            dprintf(2, "runtime error: %s\n", msg);
-            lua_pop(L, 1);
+            int r = luaL_dostring(L, input);
+            if(r != LUA_OK) {
+                const char* msg = lua_tostring(L, -1);
+                dprintf(2, "runtime error: %s\n", msg);
+                lua_pop(L, 1);
+            }
         }
 
         free(input);
@@ -109,14 +108,16 @@ static int openlibs(lua_State* L)
 }
 
 struct options {
-    const char* input;
+    const char* script;
+    int interact;
 };
 
 static void print_usage(int fd)
 {
-    dprintf(fd, "usage: %s [OPTION]... [INPUT]\n", progname);
+    dprintf(fd, "usage: %s [OPTION]... [SCRIPT]\n", progname);
     dprintf(fd, "\n");
     dprintf(fd, "options:\n");
+    dprintf(fd, "  -i       enter interactive mode after executing SCRIPT\n");
     dprintf(fd, "  -h       print this message\n");
     dprintf(fd, "  -v       print version information\n");
 }
@@ -128,8 +129,11 @@ static void parse_options(struct options* o, int argc, char* argv[])
     memset(o, 0, sizeof(*o));
 
     int res;
-    while((res = getopt(argc, argv, "hv")) != -1) {
+    while((res = getopt(argc, argv, "ihv")) != -1) {
         switch(res) {
+        case 'i':
+            o->interact = 1;
+            break;
         case 'v':
             print_version(progname);
             exit(0);
@@ -141,17 +145,45 @@ static void parse_options(struct options* o, int argc, char* argv[])
     }
 
     if(optind < argc) {
-        o->input = argv[optind];
-        info("input: %s", o->input);
-
-        struct stat st;
-        int r = stat(o->input, &st);
-        if(r == -1 && errno == ENOENT) {
-            dprintf(2, "error; unable to access input file: %s\n", o->input);
-            exit(1);
-        }
-        CHECK(r, "stat(%s)", o->input);
+        o->script = argv[optind];
     }
+}
+
+static const char* resolve_script(const struct options* o)
+{
+    if(o->script == NULL) return NULL;
+
+    debug("trying to resolve as path: %s", o->script);
+    struct stat st;
+    if(stat(o->script, &st) == 0) {
+        return o->script;
+    }
+
+    debug("trying to resolve relative to XDG data dirs: %s", o->script);
+    const char* p = xdg_resolves(xdg, XDG_DATA, o->script, NULL);
+    if(p) {
+        return p;
+    }
+
+    static char buf[NAME_MAX];
+    int r = snprintf(LIT(buf), "%s.lua", o->script);
+    if(r >= sizeof(buf)) {
+        failwith("buffer overflow");
+    }
+
+    debug("trying to resolve relative to XDG data dirs: %s", buf);
+    p = xdg_resolves(xdg, XDG_DATA, buf, NULL);
+    if(p) {
+        return p;
+    }
+
+    debug("trying to resolve as path: %s", buf);
+    if(stat(buf, &st) == 0) {
+        return buf;
+    }
+
+    dprintf(2, "unable to resolve script: %s\n", o->script);
+    exit(1);
 }
 
 int main(int argc, char* argv[])
@@ -161,12 +193,30 @@ int main(int argc, char* argv[])
 
     xdg_init();
 
+    const char* script = resolve_script(&o);
+    if(script) {
+        info("resolved script: %s", script);
+    }
+
     lua_State* L = luaL_newstate();
     CHECK_NOT(L, NULL, "unable to create Lua state");
 
     openlibs(L);
 
-    run_repl(L);
+    if(script) {
+        int r = luaL_dofile(L, script);
+        if(r == LUA_OK) {
+            if(o.interact) {
+                run_repl(L);
+            }
+        } else {
+            const char* msg = lua_tostring(L, -1);
+            dprintf(2, "%s: %s\n", progname, msg);
+            lua_pop(L, 1);
+        }
+    } else {
+        run_repl(L);
+    }
 
     lua_close(L);
 
