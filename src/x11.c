@@ -145,7 +145,7 @@ static int modes_is_preferred(lua_State* L)
     luaR_return(L, 1);
 }
 
-static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id, XRROutputInfo* oi)
+static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id, RROutput primary, XRROutputInfo* oi)
 {
     luaR_stack(L);
 
@@ -178,6 +178,11 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
     if(oi->mm_height) {
         lua_pushinteger(L, oi->mm_height);
         lua_setfield(L, -2, "mmheight");
+    }
+
+    if(primary != None) {
+        lua_pushboolean(L, primary == id ? 1 : 0);
+        lua_setfield(L, -2, "primary");
     }
 
     // modes
@@ -487,6 +492,8 @@ static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResour
     lua_getfield(L, setup_index - 1, "crtcs");
     lua_getfield(L, setup_index - 2, "modes");
 
+    RROutput primary = XRRGetOutputPrimary(xrandr->con->dpy, xrandr->con->root);
+
     for(int i = 0; i < res->noutput; i++) {
         RROutput id = res->outputs[i];
         XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, id);
@@ -494,7 +501,7 @@ static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResour
             failwith("XRRGetOutputInfo(%lu) failed", id);
         }
 
-        output_mk(L, -1, -2, id, oi);
+        output_mk(L, -1, -2, id, primary, oi);
         lua_settable(L, -5);
 
         XRRFreeOutputInfo(oi);

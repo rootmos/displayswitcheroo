@@ -13,7 +13,8 @@ print(string.format("screen %d: %dx%d (min %dx%d, max %dx%d) (window %d)",
 for n, o in pairs(setup.outputs) do
     if o.connected then
         local c = o.crtc
-        print(string.format("output %s: %dx%d+%d+%d (%dmm x %dmm)", n,
+        local pri = o.primary and " primary" or ""
+        print(string.format("output %s:%s %dx%d+%d+%d (%dmm x %dmm)", n, pri,
             c.width, c.height, c.x, c.y,
             o.mmwidth, o.mmheight))
 
