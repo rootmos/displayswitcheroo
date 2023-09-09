@@ -11,17 +11,46 @@ print(string.format("screen %d: %dx%d (min %dx%d, max %dx%d) (window %d)",
     screen.window))
 
 for n, o in pairs(setup.outputs) do
-    assert(n == o.name)
     if o.connected then
         local c = o.crtc
         print(string.format("output %s: %dx%d+%d+%d (%dmm x %dmm)", n,
             c.width, c.height, c.x, c.y,
             o.mmwidth, o.mmheight))
-        local m0 = c.mode
+
+        local s, w, h
         for _, m in ipairs(o.modes) do
-            local pref = o.modes:is_preferred(m) and "+" or " "
-            local cur = m == m0 and "*" or " "
-            print(string.format(" %s%s%dx%d %fHz", cur, pref, m.width, m.height, m.refresh_rate))
+            local flags = ""
+            if m.interlace then
+                flags = flags .. "i"
+            end
+
+            if m.double_scan then
+                flags = flags .. "d"
+            end
+
+            if o.modes:is_preferred(m) then
+                flags = flags .. "+"
+            end
+
+            if m == c.mode then
+                flags = flags .. "*"
+            end
+
+            local t = string.format(" %.2f%s", m.refresh_rate, flags)
+
+            if w == m.width and h == m.height then
+                s = s .. t
+            else
+                if s then
+                    print(s)
+                end
+                w = m.width
+                h = m.height
+                s = string.format("   %dx%d%s", w, h, t)
+            end
+        end
+        if s then
+            print(s)
         end
     else
         print(string.format("output %s", n))
@@ -29,7 +58,6 @@ for n, o in pairs(setup.outputs) do
 end
 
 for n, m in pairs(setup.monitors) do
-    assert(n == m.name)
     print(string.format("monitor %s:%s%s%s %dx%d+%d+%d (%dmm x %dmm)",
             n,
             m.active and " active" or "",
