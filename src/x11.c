@@ -17,6 +17,7 @@
 #define TYPE_XRANDR_SETUP "xrandr.setup"
 #define TYPE_XRANDR_MONITOR "xrandr.monitor"
 #define TYPE_XRANDR_MODE "xrandr.mode"
+#define TYPE_XRANDR_SCREEN "xrandr.screen"
 
 struct connection {
     Display* dpy;
@@ -516,12 +517,60 @@ static int setup_mk_monitors(lua_State* L, struct xrandr* xrandr, int setup_inde
     luaR_return(L, 1);
 }
 
+static int mk_screen(lua_State* L, struct xrandr* xrandr)
+{
+    luaR_stack(L);
+
+    lua_createtable(L, 0, 6);
+
+    if(luaL_newmetatable(L, TYPE_XRANDR_SCREEN)) {
+    }
+    lua_setmetatable(L, -2);
+
+    Display* const dpy = xrandr->con->dpy;
+    const Window window = xrandr->con->root;
+    const int scr = XRRRootToScreen(dpy, window);
+
+    lua_pushinteger(L, window);
+    lua_setfield(L, -2, "window");
+
+    lua_pushinteger(L, scr);
+    lua_setfield(L, -2, "number");
+
+    lua_pushinteger(L, XDisplayWidth(dpy, scr));
+    lua_setfield(L, -2, "width");
+
+    lua_pushinteger(L, XDisplayHeight(dpy, scr));
+    lua_setfield(L, -2, "height");
+
+    int minWidth, minHeight, maxWidth, maxHeight;
+    if(!XRRGetScreenSizeRange(dpy, window, &minWidth, &minHeight, &maxWidth, &maxHeight)) {
+        failwith("XRRGetScreenSizeRange failed");
+    }
+
+    lua_createtable(L, 0, 2);
+    lua_pushinteger(L, minWidth);
+    lua_setfield(L, -2, "width");
+    lua_pushinteger(L, minHeight);
+    lua_setfield(L, -2, "height");
+    lua_setfield(L, -2, "min");
+
+    lua_createtable(L, 0, 2);
+    lua_pushinteger(L, maxWidth);
+    lua_setfield(L, -2, "width");
+    lua_pushinteger(L, maxHeight);
+    lua_setfield(L, -2, "height");
+    lua_setfield(L, -2, "max");
+
+    luaR_return(L, 1);
+}
+
 static int xrandr_fetch_setup(lua_State* L)
 {
     luaR_stack(L);
     struct xrandr* xrandr = luaL_checkudata(L, 1, TYPE_XRANDR);
 
-    lua_createtable(L, 0, 2);
+    lua_createtable(L, 0, 5);
 
     if(luaL_newmetatable(L, TYPE_XRANDR_SETUP)) {
     }
@@ -531,6 +580,9 @@ static int xrandr_fetch_setup(lua_State* L)
     if(!res) {
         failwith("XRRGetScreenResources failed");
     }
+
+    mk_screen(L, xrandr);
+    lua_setfield(L, -2, "screen");
 
     setup_mk_modes(L, res);
     lua_setfield(L, -2, "modes");

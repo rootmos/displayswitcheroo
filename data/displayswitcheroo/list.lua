@@ -3,6 +3,13 @@ local dpy <close> = X11.connect()
 
 local setup = dpy.xrandr:fetch();
 
+local screen = setup.screen
+print(string.format("screen %d: %dx%d (min %dx%d, max %dx%d) (window %d)",
+    screen.number, screen.width, screen.height,
+    screen.min.width, screen.min.height,
+    screen.max.width, screen.max.height,
+    screen.window))
+
 for n, o in pairs(setup.outputs) do
     assert(n == o.name)
     print(string.format("output %s", n))
