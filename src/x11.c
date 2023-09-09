@@ -151,7 +151,7 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
 
     lua_pushstring(L, oi->name);
 
-    lua_createtable(L, 0, 4);
+    lua_createtable(L, 0, 6);
     if(luaL_newmetatable(L, TYPE_XRANDR_OUTPUT)) {
     }
     lua_setmetatable(L, -2);
@@ -169,6 +169,16 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
 
     lua_pushinteger(L, id);
     lua_setfield(L, -2, "id");
+
+    if(oi->mm_width) {
+        lua_pushinteger(L, oi->mm_width);
+        lua_setfield(L, -2, "mmwidth");
+    }
+
+    if(oi->mm_height) {
+        lua_pushinteger(L, oi->mm_height);
+        lua_setfield(L, -2, "mmheight");
+    }
 
     // modes
     lua_createtable(L, oi->nmode, 2);
@@ -272,7 +282,7 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
     }
     lua_pushstring(L, name);
 
-    lua_createtable(L, 0, 10);
+    lua_createtable(L, 0, 11);
 
     if(luaL_newmetatable(L, TYPE_XRANDR_MONITOR)) {
     }
@@ -298,10 +308,10 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
         lua_setfield(L, -2, "height");
 
         lua_pushinteger(L, mi->mheight);
-        lua_setfield(L, -2, "mheight");
+        lua_setfield(L, -2, "mmheight");
 
         lua_pushinteger(L, mi->mwidth);
-        lua_setfield(L, -2, "mwidth");
+        lua_setfield(L, -2, "mmwidth");
 
         lua_createtable(L, mi->noutput, 0);
         for(int i = 0; i < mi->noutput; i++) {
@@ -331,6 +341,9 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
 
     lua_pushboolean(L, mi->primary);
     lua_setfield(L, -2, "primary");
+
+    lua_pushboolean(L, mi->automatic);
+    lua_setfield(L, -2, "automatic");
 
     luaR_return(L, 2);
 }
