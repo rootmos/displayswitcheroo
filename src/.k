@@ -1,7 +1,7 @@
 export XDG_DATA_DIRS=$K_DIR/../data:$XDG_DATA_DIRS
 
 cli() {
-    make LOG_LEVEL=DEBUG cli.exe && ./cli.exe list
+    make LOG_LEVEL=DEBUG cli.exe && ./cli.exe "${1-list}"
 }
 
 go() {

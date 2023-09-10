@@ -9,31 +9,98 @@
 #include "r.h"
 #include "x11.h"
 
-#define TYPE_CONNECTION "x11"
-#define TYPE_XRANDR "xrandr"
-#define TYPE_XRANDR_CRTC "xrandr.crtc"
-#define TYPE_XRANDR_OUTPUT "xrandr.output"
-#define TYPE_XRANDR_OUTPUT_MODES "xrandr.output.modes"
-#define TYPE_XRANDR_SETUP "xrandr.setup"
-#define TYPE_XRANDR_MONITOR "xrandr.monitor"
-#define TYPE_XRANDR_MODE "xrandr.mode"
-#define TYPE_XRANDR_SCREEN "xrandr.screen"
+#define TYPE_DISPLAY "x11.display"
+#define TYPE_XRANDR "x11.xrandr"
+#define TYPE_XRANDR_CRTC "x11.xrandr.crtc"
+#define TYPE_XRANDR_OUTPUT "x11.xrandr.output"
+#define TYPE_XRANDR_OUTPUT_MODES "x11.xrandr.output.modes"
+#define TYPE_XRANDR_SETUP "x11.xrandr.setup"
+#define TYPE_XRANDR_MONITOR "x11.xrandr.monitor"
+#define TYPE_XRANDR_MODE "x11.xrandr.mode"
+#define TYPE_XRANDR_SCREEN "x11.xrandr.screen"
 
-struct connection {
+struct display {
+    int ref;
     Display* dpy;
-
-    int scr;
-    Window root;
-
-    struct xrandr* xrandr;
 };
 
+static struct display* display_ref(struct display* display)
+{
+    display->ref += 1;
+    return display;
+}
+
+static void display_unref(struct display* display)
+{
+    if(--display->ref == 0) {
+        debug("closing display %p", display);
+        XCloseDisplay(display->dpy);
+    }
+}
+
+static int display_gc(lua_State* L)
+{
+    luaR_stack(L);
+    display_unref(luaL_checkudata(L, 1, TYPE_DISPLAY));
+    luaR_return(L, 0);
+}
+
 struct xrandr {
-    struct connection* con;
+    int ref;
+
+    struct display* display;
 
     int major;
     int minor;
 };
+
+static struct xrandr* xrandr_ref(struct xrandr* xrandr)
+{
+    xrandr->ref += 1;
+    return xrandr;
+}
+
+static void xrandr_unref(struct xrandr* xrandr)
+{
+    if(--xrandr->ref == 0) {
+        display_unref(xrandr->display);
+    }
+}
+
+static int xrandr_gc(lua_State* L)
+{
+    luaR_stack(L);
+    xrandr_unref(luaL_checkudata(L, 1, TYPE_XRANDR));
+    luaR_return(L, 0);
+}
+
+struct setup {
+    int ref;
+
+    struct xrandr* xrandr;
+
+    XRRScreenResources* res;
+};
+
+static void setup_ref(struct setup* setup)
+{
+    setup->ref += 1;
+}
+
+static void setup_unref(struct setup* setup)
+{
+    if(--setup->ref == 0) {
+        XRRFreeScreenResources(setup->res);
+        xrandr_unref(setup->xrandr);
+    }
+}
+
+static int setup_gc(lua_State* L)
+{
+    luaR_stack(L);
+    setup_unref(luaL_checkudata(L, 1, TYPE_XRANDR_SETUP));
+    luaR_return(L, 0);
+}
 
 static int crtc_mk(lua_State* L, int modes_index, RRCrtc id, XRRCrtcInfo* ci)
 {
@@ -266,11 +333,7 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
                 }
             }
         }
-        lua_pop(L, 1);
-
-        lua_pop(L, 2);
-
-        lua_pop(L, 1);
+        lua_pop(L, 4);
     }
 
     luaR_return(L, 2);
@@ -280,7 +343,7 @@ static int monitor_mk(lua_State* L, struct xrandr* xrandr, int output_index, con
 {
     luaR_stack(L);
 
-    char* name = XGetAtomName(xrandr->con->dpy, mi->name);
+    char* name = XGetAtomName(xrandr->display->dpy, mi->name);
     if(!name) {
         failwith("XGetAtomName(%ld)", mi->name);
     }
@@ -453,7 +516,7 @@ static int setup_mk_crtcs(lua_State* L, struct xrandr* xrandr, XRRScreenResource
 
     for(int i = 0; i < res->ncrtc; i++) {
         RRCrtc id = res->crtcs[i];
-        XRRCrtcInfo* ci = XRRGetCrtcInfo(xrandr->con->dpy, res, id);
+        XRRCrtcInfo* ci = XRRGetCrtcInfo(xrandr->display->dpy, res, id);
 
         crtc_mk(L, -1, id, ci);
 
@@ -483,7 +546,7 @@ static int setup_mk_modes(lua_State* L, XRRScreenResources* res)
     luaR_return(L, 1);
 }
 
-static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResources* res, int setup_index)
+static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResources* res, int setup_index, Window root)
 {
     luaR_stack(L);
 
@@ -491,11 +554,11 @@ static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResour
     lua_getfield(L, setup_index - 1, "crtcs");
     lua_getfield(L, setup_index - 2, "modes");
 
-    RROutput primary = XRRGetOutputPrimary(xrandr->con->dpy, xrandr->con->root);
+    RROutput primary = XRRGetOutputPrimary(xrandr->display->dpy, root);
 
     for(int i = 0; i < res->noutput; i++) {
         RROutput id = res->outputs[i];
-        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->con->dpy, res, id);
+        XRROutputInfo* oi = XRRGetOutputInfo(xrandr->display->dpy, res, id);
         if(!oi) {
             failwith("XRRGetOutputInfo(%lu) failed", id);
         }
@@ -511,12 +574,12 @@ static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResour
     luaR_return(L, 1);
 }
 
-static int setup_mk_monitors(lua_State* L, struct xrandr* xrandr, int setup_index)
+static int setup_mk_monitors(lua_State* L, struct xrandr* xrandr, int setup_index, Window root)
 {
     luaR_stack(L);
 
     int nmonitors;
-    XRRMonitorInfo* mi = XRRGetMonitors(xrandr->con->dpy, xrandr->con->root, False, &nmonitors);
+    XRRMonitorInfo* mi = XRRGetMonitors(xrandr->display->dpy, root, False, &nmonitors);
     if(!mi) {
         failwith("XRRGetMonitors failed");
     }
@@ -536,7 +599,7 @@ static int setup_mk_monitors(lua_State* L, struct xrandr* xrandr, int setup_inde
     luaR_return(L, 1);
 }
 
-static int mk_screen(lua_State* L, struct xrandr* xrandr)
+static int setup_mk_screen(lua_State* L, struct xrandr* xrandr, Window root)
 {
     luaR_stack(L);
 
@@ -546,11 +609,10 @@ static int mk_screen(lua_State* L, struct xrandr* xrandr)
     }
     lua_setmetatable(L, -2);
 
-    Display* const dpy = xrandr->con->dpy;
-    const Window window = xrandr->con->root;
-    const int scr = XRRRootToScreen(dpy, window);
+    Display* const dpy = xrandr->display->dpy;
+    const int scr = XRRRootToScreen(dpy, root);
 
-    lua_pushinteger(L, window);
+    lua_pushinteger(L, root);
     lua_setfield(L, -2, "window");
 
     lua_pushinteger(L, scr);
@@ -563,7 +625,7 @@ static int mk_screen(lua_State* L, struct xrandr* xrandr)
     lua_setfield(L, -2, "height");
 
     int minWidth, minHeight, maxWidth, maxHeight;
-    if(!XRRGetScreenSizeRange(dpy, window, &minWidth, &minHeight, &maxWidth, &maxHeight)) {
+    if(!XRRGetScreenSizeRange(dpy, root, &minWidth, &minHeight, &maxWidth, &maxHeight)) {
         failwith("XRRGetScreenSizeRange failed");
     }
 
@@ -584,46 +646,83 @@ static int mk_screen(lua_State* L, struct xrandr* xrandr)
     luaR_return(L, 1);
 }
 
-static int xrandr_fetch_setup(lua_State* L)
+static int setup_set_crtc(lua_State* L)
 {
+    int isnum;
+
     luaR_stack(L);
-    struct xrandr* xrandr = luaL_checkudata(L, 1, TYPE_XRANDR);
+    struct setup* setup = luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);
+    luaL_checktype(L, 2, LUA_TTABLE);
 
-    lua_createtable(L, 0, 5);
+    if(lua_getfield(L, 2, "id") == LUA_TNIL) return luaL_error(L, ".id field not present");
+    RRCrtc id = lua_tointegerx(L, -1, &isnum);
+    if(!isnum) return luaL_error(L, ".id field not an integer");
+    lua_pop(L, 1);
+    luaR_stack_expect(L, 0);
 
-    if(luaL_newmetatable(L, TYPE_XRANDR_SETUP)) {
+    if(lua_getfield(L, 2, "x") == LUA_TNIL) return luaL_error(L, ".x field not present");
+    int x = lua_tointegerx(L, -1, &isnum);
+    if(!isnum) return luaL_error(L, ".x field not an integer");
+    lua_pop(L, 1);
+    luaR_stack_expect(L, 0);
+
+    if(lua_getfield(L, 2, "y") == LUA_TNIL) return luaL_error(L, ".y field not present");
+    int y = lua_tointegerx(L, -1, &isnum);
+    if(!isnum) return luaL_error(L, ".y field not an integer");
+    lua_pop(L, 1);
+    luaR_stack_expect(L, 0);
+
+    if(lua_getfield(L, 2, "mode") == LUA_TNIL) return luaL_error(L, ".mode field not present");
+    if(lua_getfield(L, -1, "id") == LUA_TNIL) return luaL_error(L, ".mode.id field not present");
+    RRMode mode = lua_tointegerx(L, -1, &isnum);
+    if(!isnum) return luaL_error(L, ".mode.id field not an integer");
+    lua_pop(L, 2);
+    luaR_stack_expect(L, 0);
+
+    Rotation rotation = RR_Rotate_0;
+
+    if(lua_getfield(L, 2, "outputs") != LUA_TTABLE) return luaL_error(L, ".outputs field is not at table or not present");
+    lua_len(L, -1);
+    int noutputs = lua_tointegerx(L, -1, &isnum);
+    debug("noutputs=%d", noutputs);
+    if(!isnum) return luaL_error(L, "#.outputs is not an integer");
+    lua_pop(L, 1);
+    luaR_stack_expect(L, 1);
+
+    RROutput outputs[noutputs];
+
+    for(int i = 1, t = lua_rawgeti(L, -1, i); t != LUA_TNIL; lua_pop(L, 1), t = lua_rawgeti(L, -1, ++i)) {
+        if(lua_getfield(L, -1, "id") == LUA_TNIL) return luaL_error(L, ".outputs[%d].id field not present", i);
+        outputs[i-1] = lua_tointegerx(L, -1, &isnum);
+        debug("outputs[%d] = %ld", i, outputs[i-1]);
+        if(!isnum) return luaL_error(L, ".outputs[%d].id field not an integer", i);
+        lua_pop(L, 2);
     }
-    lua_setmetatable(L, -2);
+    lua_pop(L, 1);
+    luaR_stack_expect(L, 0);
 
-    XRRScreenResources* res = XRRGetScreenResources(xrandr->con->dpy, xrandr->con->root);
-    if(!res) {
-        failwith("XRRGetScreenResources failed");
+    debug("updating CRTC %ld: +%d+%d mode=%ld", id, x, y, mode);
+
+    Status s = XRRSetCrtcConfig(
+        setup->xrandr->display->dpy, setup->res,
+        id,
+        CurrentTime,
+        x, y,
+        mode,
+        rotation,
+        outputs, noutputs);
+    debug("%d", s);
+    if(!s) {
+        warning("XRRSetCrtcConfig failed");
     }
 
-    mk_screen(L, xrandr);
-    lua_setfield(L, -2, "screen");
-
-    setup_mk_modes(L, res);
-    lua_setfield(L, -2, "modes");
-
-    setup_mk_crtcs(L, xrandr, res, -1);
-    lua_setfield(L, -2, "crtcs");
-
-    setup_mk_outputs(L, xrandr, res, -1);
-    lua_setfield(L, -2, "outputs");
-
-    setup_mk_monitors(L, xrandr, -1);
-    lua_setfield(L, -2, "monitors");
-
-    XRRFreeScreenResources(res);
-
-    luaR_return(L, 1);
+    luaR_return(L, 0);
 }
 
-static int index_upvalue1_iuservalue1(lua_State* L)
+static int setup_index(lua_State* L)
 {
     luaR_stack(L);
-    luaL_checkany(L, 1);
+    luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);
     luaL_checkany(L, 2);
 
     lua_pushvalue(L, 2);
@@ -641,23 +740,95 @@ static int index_upvalue1_iuservalue1(lua_State* L)
     luaR_return(L, 1);
 }
 
-static int x11_xrandr(lua_State* L, struct connection* con)
+static int xrandr_fetch(lua_State* L)
 {
     luaR_stack(L);
-    if(con->xrandr != NULL) {
-        lua_getiuservalue(L, 1, 1);
-        luaR_return(L, 1);
+    struct xrandr* xrandr = luaL_checkudata(L, 1, TYPE_XRANDR);
+
+    struct setup* setup = lua_newuserdatauv(L, sizeof(*setup), 1);
+    setup_ref(setup);
+
+    setup->xrandr = xrandr_ref(xrandr);
+
+    const Window root = XRootWindow(xrandr->display->dpy, XDefaultScreen(xrandr->display->dpy));
+    setup->res = XRRGetScreenResources(xrandr->display->dpy, root);
+    if(!setup->res) {
+        failwith("XRRGetScreenResources failed");
     }
 
-    struct xrandr* xrandr = con->xrandr = lua_newuserdatauv(L, sizeof(*xrandr), 1);
-    xrandr->con = con;
+    lua_createtable(L, 0, 5);
+    {
+        setup_mk_screen(L, xrandr, root);
+        lua_setfield(L, -2, "screen");
 
-    if(!XRRQueryVersion(xrandr->con->dpy, &xrandr->major, &xrandr->minor)) {
+        setup_mk_modes(L, setup->res);
+        lua_setfield(L, -2, "modes");
+
+        setup_mk_crtcs(L, xrandr, setup->res, -1);
+        lua_setfield(L, -2, "crtcs");
+
+        setup_mk_outputs(L, xrandr, setup->res, -1, root);
+        lua_setfield(L, -2, "outputs");
+
+        setup_mk_monitors(L, xrandr, -1, root);
+        lua_setfield(L, -2, "monitors");
+    }
+    lua_setiuservalue(L, -2, 1);
+
+    if(luaL_newmetatable(L, TYPE_XRANDR_SETUP)) {
+        luaL_Reg l[] = {
+            { "set_crtc", setup_set_crtc },
+            { NULL, NULL },
+        };
+        luaL_newlib(L, l);
+
+        lua_pushcclosure(L, setup_index, 1);
+        lua_setfield(L, -2, "__index");
+
+        lua_pushcfunction(L, setup_gc);
+        lua_setfield(L, -2, "__gc");
+    }
+    lua_setmetatable(L, -2);
+
+    luaR_return(L, 1);
+}
+
+static int xrandr_index(lua_State* L)
+{
+    luaR_stack(L);
+    luaL_checkudata(L, 1, TYPE_XRANDR);
+    luaL_checkany(L, 2);
+
+    lua_pushvalue(L, 2);
+    if(lua_gettable(L, lua_upvalueindex(1)) != LUA_TNIL) {
+        luaR_return(L, 1);
+    }
+    lua_pop(L, 1);
+
+    if(lua_getiuservalue(L, 1, 1) != LUA_TTABLE) {
+        failwith("unexpected type");
+    }
+    lua_pushvalue(L, 2);
+    lua_gettable(L, -2);
+    lua_replace(L, -2);
+    luaR_return(L, 1);
+}
+
+static int xrandr_mk(lua_State* L, struct display* display)
+{
+    luaR_stack(L);
+
+    struct xrandr* xrandr = lua_newuserdatauv(L, sizeof(*xrandr), 1);
+    xrandr_ref(xrandr);
+
+    xrandr->display = display_ref(display);
+
+    if(!XRRQueryVersion(xrandr->display->dpy, &xrandr->major, &xrandr->minor)) {
         failwith("XRRQueryVersion failed");
     }
     debug("Xrandr version: %d.%d", xrandr->major, xrandr->minor);
 
-    lua_createtable(L, 0, 1);
+    lua_createtable(L, 0, 2);
     {
         char buf[128];
         int r = snprintf(LIT(buf), "%d.%d", xrandr->major, xrandr->minor);
@@ -671,55 +842,62 @@ static int x11_xrandr(lua_State* L, struct connection* con)
 
     if(luaL_newmetatable(L, TYPE_XRANDR)) {
         luaL_Reg l[] = {
-            { "fetch", xrandr_fetch_setup },
+            { "fetch", xrandr_fetch },
             { NULL, NULL },
         };
         luaL_newlib(L, l);
-
-        lua_pushcclosure(L, index_upvalue1_iuservalue1, 1);
+        lua_pushcclosure(L, xrandr_index, 1);
         lua_setfield(L, -2, "__index");
 
-        lua_pushcfunction(L, xrandr_fetch_setup);
+        lua_pushcfunction(L, xrandr_gc);
+        lua_setfield(L, -2, "__gc");
+
+        lua_pushcfunction(L, xrandr_fetch);
         lua_setfield(L, -2, "__call");
     }
     lua_setmetatable(L, -2);
 
-    lua_pushvalue(L, -1);
-    lua_setiuservalue(L, 1, 1);
     luaR_return(L, 1);
 }
 
-static int x11_close(lua_State* L)
+static int display_index(lua_State* L)
 {
     luaR_stack(L);
-    struct connection* con = luaL_checkudata(L, 1, TYPE_CONNECTION);
+    struct display* display = luaL_checkudata(L, 1, TYPE_DISPLAY);
+    luaL_checkany(L, 2);
 
-    debug("closing connection %p", con);
-
-    XCloseDisplay(con->dpy);
-
-    luaR_return(L, 0);
-}
-
-static int x11_index(lua_State* L)
-{
-    luaR_stack(L);
-    struct connection* con = luaL_checkudata(L, 1, TYPE_CONNECTION);
-    const char* key = luaL_checkstring(L, 2);
-
-    if(strcmp(key, "screen") == 0) {
-        lua_pushinteger(L, con->scr);
-        luaR_return(L, 1);
-    } else if(strcmp(key, "root") == 0) {
-        lua_pushinteger(L, con->root);
-        luaR_return(L, 1);
-    } else if(strcmp(key, "xrandr") == 0) {
-        return x11_xrandr(L, con);
-    } else {
-        debug("indexing absent key %p[%s]", con, key);
-        lua_pushnil(L);
+    lua_pushvalue(L, 2);
+    if(lua_gettable(L, lua_upvalueindex(1)) != LUA_TNIL) {
         luaR_return(L, 1);
     }
+    lua_pop(L, 1);
+    luaR_stack_expect(L, 0);
+
+    if(lua_getiuservalue(L, 1, 1) != LUA_TTABLE) {
+        failwith("unexpected type");
+    }
+    lua_pushvalue(L, 2);
+    int t = lua_gettable(L, -2);
+    if(t != LUA_TNIL) {
+        lua_replace(L, -2);
+        luaR_return(L, 1);
+    }
+    lua_pop(L, 1);
+    luaR_stack_expect(L, 1);
+
+    lua_pushliteral(L, "xrandr");
+    if(lua_rawequal(L, 2, -1)) {
+        xrandr_mk(L, display);
+        lua_pushvalue(L, -1);
+        lua_rotate(L, -4, 1);
+        lua_rawset(L, -3);
+        lua_pop(L, 1);
+    } else {
+        lua_pop(L, 2);
+        lua_pushnil(L);
+    }
+
+    luaR_return(L, 1);
 }
 
 static int x11_connect(lua_State* L)
@@ -727,24 +905,35 @@ static int x11_connect(lua_State* L)
     luaR_stack(L);
     int argc = lua_gettop(L);
 
-    struct connection* con = lua_newuserdatauv(L, sizeof(struct connection), 1);
-    memset(con, 0, sizeof(*con));
+    struct display* display = lua_newuserdatauv(L, sizeof(struct display), 1);
+    memset(display, 0, sizeof(*display));
+    display_ref(display);
 
     char* d = XDisplayName(argc == 0 ? NULL : luaL_checkstring(L, 1));
-    debug("creating connection %p to %s", con, d);
+    debug("connecting (%p) to display: %s", display, d);
 
-    con->dpy = XOpenDisplay(d);
-    if(con->dpy == NULL) luaR_failwith(L, "unable to connect to display %s", d);
+    display->dpy = XOpenDisplay(d);
+    if(display->dpy == NULL) {
+        luaR_failwith(L, "unable to connect to display %s", d);
+    }
 
-    con->scr = XDefaultScreen(con->dpy);
-    con->root = XRootWindow(con->dpy, con->scr);
+    lua_createtable(L, 0, 2);
 
-    if(luaL_newmetatable(L, TYPE_CONNECTION)) {
-        lua_pushcfunction(L, x11_close);
-        lua_setfield(L, -2, "__close");
+    lua_pushstring(L, d);
+    lua_setfield(L, -2, "name");
 
-        lua_pushcfunction(L, x11_index);
+    lua_setiuservalue(L, -2, 1);
+
+    if(luaL_newmetatable(L, TYPE_DISPLAY)) {
+        luaL_Reg l[] = {
+            { NULL, NULL },
+        };
+        luaL_newlib(L, l);
+        lua_pushcclosure(L, display_index, 1);
         lua_setfield(L, -2, "__index");
+
+        lua_pushcfunction(L, display_gc);
+        lua_setfield(L, -2, "__gc");
     }
 
     lua_setmetatable(L, -2);

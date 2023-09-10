@@ -1,5 +1,5 @@
 local X11 = require("x11")
-local dpy <close> = X11.connect()
+local dpy = X11.connect()
 
 local setup = dpy.xrandr:fetch();
 
