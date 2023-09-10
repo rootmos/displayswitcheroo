@@ -193,8 +193,7 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
             { "is_preferred", modes_is_preferred },
             { NULL, NULL },
         };
-        luaL_newlibtable(L, l);
-        luaL_setfuncs(L, l, 0);
+        luaL_newlib(L, l);
 
         lua_setfield(L, -2, "__index");
     }
@@ -621,63 +620,73 @@ static int xrandr_fetch_setup(lua_State* L)
     luaR_return(L, 1);
 }
 
-static int xrandr_index(lua_State* L)
+static int index_upvalue1_iuservalue1(lua_State* L)
 {
     luaR_stack(L);
-    struct xrandr* xrandr = luaL_checkudata(L, 1, TYPE_XRANDR);
-    const char* key = luaL_checkstring(L, 2);
+    luaL_checkany(L, 1);
+    luaL_checkany(L, 2);
 
-    if(strcmp(key, "version") == 0) {
+    lua_pushvalue(L, 2);
+    if(lua_gettable(L, lua_upvalueindex(1)) != LUA_TNIL) {
+        luaR_return(L, 1);
+    }
+    lua_pop(L, 1);
+
+    if(lua_getiuservalue(L, 1, 1) != LUA_TTABLE) {
+        failwith("unexpected type");
+    }
+    lua_pushvalue(L, 2);
+    lua_gettable(L, -2);
+    lua_replace(L, -2);
+    luaR_return(L, 1);
+}
+
+static int x11_xrandr(lua_State* L, struct connection* con)
+{
+    luaR_stack(L);
+    if(con->xrandr != NULL) {
+        lua_getiuservalue(L, 1, 1);
+        luaR_return(L, 1);
+    }
+
+    struct xrandr* xrandr = con->xrandr = lua_newuserdatauv(L, sizeof(*xrandr), 1);
+    xrandr->con = con;
+
+    if(!XRRQueryVersion(xrandr->con->dpy, &xrandr->major, &xrandr->minor)) {
+        failwith("XRRQueryVersion failed");
+    }
+    debug("Xrandr version: %d.%d", xrandr->major, xrandr->minor);
+
+    lua_createtable(L, 0, 1);
+    {
         char buf[128];
         int r = snprintf(LIT(buf), "%d.%d", xrandr->major, xrandr->minor);
         if(r >= sizeof(buf)) {
             failwith("buffer overflow");
         }
         lua_pushstring(L, buf);
-        luaR_return(L, 1);
-    } else if(strcmp(key, "fetch") == 0) {
+        lua_setfield(L, -2, "version");
+    }
+    lua_setiuservalue(L, -2, 1);
+
+    if(luaL_newmetatable(L, TYPE_XRANDR)) {
+        luaL_Reg l[] = {
+            { "fetch", xrandr_fetch_setup },
+            { NULL, NULL },
+        };
+        luaL_newlib(L, l);
+
+        lua_pushcclosure(L, index_upvalue1_iuservalue1, 1);
+        lua_setfield(L, -2, "__index");
+
         lua_pushcfunction(L, xrandr_fetch_setup);
-        luaR_return(L, 1);
-    } else {
-        debug("indexing absent key %p[%s]", xrandr, key);
-        lua_pushnil(L);
-        luaR_return(L, 1);
+        lua_setfield(L, -2, "__call");
     }
-}
+    lua_setmetatable(L, -2);
 
-static int xrandr_call(lua_State* L)
-{
-    return xrandr_fetch_setup(L);
-}
-
-static int x11_xrandr(lua_State* L, struct connection* con)
-{
-    luaR_stack(L);
-    if(con->xrandr == NULL) {
-        struct xrandr* xrandr = con->xrandr = lua_newuserdatauv(L, sizeof(*xrandr), 0);
-        xrandr->con = con;
-
-        if(!XRRQueryVersion(xrandr->con->dpy, &xrandr->major, &xrandr->minor)) {
-            failwith("XRRQueryVersion failed");
-        }
-        debug("Xrandr version: %d.%d", xrandr->major, xrandr->minor);
-
-        if(luaL_newmetatable(L, TYPE_XRANDR)) {
-            lua_pushcfunction(L, xrandr_index);
-            lua_setfield(L, -2, "__index");
-
-            lua_pushcfunction(L, xrandr_call);
-            lua_setfield(L, -2, "__call");
-        }
-        lua_setmetatable(L, -2);
-
-        lua_pushvalue(L, -1);
-        lua_setiuservalue(L, 1, 1);
-        luaR_return(L, 1);
-    } else {
-        lua_getiuservalue(L, 1, 1);
-        luaR_return(L, 1);
-    }
+    lua_pushvalue(L, -1);
+    lua_setiuservalue(L, 1, 1);
+    luaR_return(L, 1);
 }
 
 static int x11_close(lua_State* L)
