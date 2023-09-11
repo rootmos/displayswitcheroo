@@ -13,11 +13,11 @@ print(string.format("screen %d: %dx%d (min %dx%d, max %dx%d) (%dmm x %dmm) (wind
 
 for n, o in pairs(setup.outputs) do
     if o.connected then
-        local c = o.crtc
         local pri = o.primary and " primary" or ""
-        print(string.format("output %s:%s %dx%d+%d+%d (%dmm x %dmm)", n, pri,
-            c.width, c.height, c.x, c.y,
-            o.mmwidth, o.mmheight))
+
+        local c = o.crtc
+        local geom = c and string.format(" %dx%d+%d+%d", c.width, c.height, c.x, c.y) or ""
+        print(string.format("output %s:%s%s (%dmm x %dmm)", n, pri, geom, o.mmwidth, o.mmheight))
 
         local s, w, h
         for _, m in ipairs(o.modes) do
@@ -34,7 +34,7 @@ for n, o in pairs(setup.outputs) do
                 flags = flags .. "+"
             end
 
-            if m == c.mode then
+            if c and m == c.mode then
                 flags = flags .. "*"
             end
 

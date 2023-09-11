@@ -715,10 +715,43 @@ static int setup_set_crtc(lua_State* L)
         mode,
         rotation,
         outputs, noutputs);
-    debug("%d", s);
-    if(!s) {
-        warning("XRRSetCrtcConfig failed");
+    if(s != RRSetConfigSuccess) {
+        return luaL_error(L, "unable to configure crtc: %d", id);
     }
+
+    luaR_return(L, 0);
+}
+
+static int setup_disable_crtc(lua_State* L)
+{
+    luaR_stack(L);
+
+    struct setup* setup = luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);
+    RRCrtc id = luaL_checkinteger(L, 2);
+
+    debug("disabling crtc: %ld", id);
+
+    Status s = XRRSetCrtcConfig(
+        setup->xrandr->display->dpy, setup->res,
+        id,
+        CurrentTime,
+        0, 0,
+        None,
+        RR_Rotate_0,
+        NULL, 0);
+    if(s != RRSetConfigSuccess) {
+        return luaL_error(L, "unable to disable crtc: %d", id);
+    }
+
+    luaR_return(L, 0);
+}
+
+static int setup_set_screen_size(lua_State* L)
+{
+    luaR_stack(L);
+    /*struct setup* setup = luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);*/
+    luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);
+    luaL_checktype(L, 2, LUA_TTABLE);
 
     luaR_return(L, 0);
 }
@@ -782,6 +815,8 @@ static int xrandr_fetch(lua_State* L)
     if(luaL_newmetatable(L, TYPE_XRANDR_SETUP)) {
         luaL_Reg l[] = {
             { "set_crtc", setup_set_crtc },
+            { "disable_crtc", setup_disable_crtc },
+            { "set_screen_size", setup_set_screen_size },
             { NULL, NULL },
         };
         luaL_newlib(L, l);
