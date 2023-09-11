@@ -24,6 +24,121 @@ struct display {
     Display* dpy;
 };
 
+static int display_init_registry(lua_State* L, const struct display* display)
+{
+    luaR_stack(L);
+
+    lua_pushlightuserdata(L, display->dpy);
+    lua_createtable(L, 0, 1);
+
+    lua_createtable(L, 0, 0);
+    lua_setfield(L, -2, "errors");
+
+    luaR_stack_expect(L, 2);
+    lua_settable(L, LUA_REGISTRYINDEX);
+
+    luaR_return(L, 0);
+}
+
+static int display_deinit_registry(lua_State* L, const struct display* display)
+{
+    luaR_stack(L);
+
+    lua_pushlightuserdata(L, display->dpy);
+    lua_pushnil(L);
+
+    luaR_stack_expect(L, 2);
+    lua_settable(L, LUA_REGISTRYINDEX);
+
+    luaR_return(L, 0);
+}
+
+static int display_push_registry(lua_State* L, Display* dpy)
+{
+    luaR_stack(L);
+
+    lua_pushlightuserdata(L, dpy);
+    int t = lua_gettable(L, LUA_REGISTRYINDEX);
+    if(t != LUA_TTABLE) {
+        return luaL_error(L, "unexpected registry value");
+    }
+    luaR_return(L, 1);
+}
+
+static struct {
+    Display* dpy;
+    lua_State* L;
+} states[32] = { 0 };
+
+static void register_state(Display* dpy, lua_State* L)
+{
+    for(size_t i = 0; i < LENGTH(states); i++) {
+        if(states[i].dpy == NULL) {
+            states[i].dpy = dpy;
+            states[i].L = L;
+            return;
+        }
+    }
+    failwith("too many states");
+}
+
+static void unregister_state(Display* dpy)
+{
+    for(size_t i = 0; i < LENGTH(states); i++) {
+        if(states[i].dpy == dpy) {
+            states[i].dpy = NULL;
+            states[i].L = NULL;
+            return;
+        }
+    }
+    failwith("state not registered: %p", dpy);
+}
+
+static lua_State* resolve_state(Display* dpy)
+{
+    for(size_t i = 0; i < LENGTH(states); i++) {
+        if(states[i].dpy == dpy) {
+            return states[i].L;
+        }
+    }
+    failwith("state not registered: %p", dpy);
+}
+
+static int handle_x11_error(Display* dpy, XErrorEvent* e)
+{
+    lua_State* L = resolve_state(dpy);
+    luaR_stack(L);
+
+    int t = lua_getglobal(L, "require");
+    if(t != LUA_TFUNCTION) {
+        failwith("require has unexpected type: %s", lua_typename(L, t));
+    }
+    lua_pushliteral(L, "table");
+    lua_call(L, 1, 1);
+    t = lua_getfield(L, -1, "insert");
+    if(t != LUA_TFUNCTION) {
+        failwith("table.insert has unexpected type: %s", lua_typename(L, t));
+    }
+    lua_replace(L, -2);
+    luaR_stack_expect(L, 1); // table.insert
+
+    display_push_registry(L, dpy);
+    lua_getfield(L, -1, "errors");
+    lua_replace(L, -2);
+    luaR_stack_expect(L, 2); // errors table.insert
+
+    char buf[4096];
+    XGetErrorText(dpy, e->error_code, LIT(buf));
+    error("%s", buf);
+
+    lua_pushstring(L, buf); // error errors table.insert
+
+    lua_call(L, 2, 0);
+
+    luaR_stack_expect(L, 0);
+    return 0;
+}
+
 static struct display* display_ref(struct display* display)
 {
     display->ref += 1;
@@ -41,7 +156,10 @@ static void display_unref(struct display* display)
 static int display_gc(lua_State* L)
 {
     luaR_stack(L);
-    display_unref(luaL_checkudata(L, 1, TYPE_DISPLAY));
+    struct display* display = luaL_checkudata(L, 1, TYPE_DISPLAY);
+    display_deinit_registry(L, display);
+    unregister_state(display->dpy);
+    display_unref(display);
     luaR_return(L, 0);
 }
 
@@ -956,6 +1074,9 @@ static int x11_connect(lua_State* L)
         luaR_failwith(L, "unable to connect to display %s", d);
     }
 
+    register_state(display->dpy, L);
+    display_init_registry(L, display);
+
     lua_createtable(L, 0, 2);
 
     lua_pushstring(L, d);
@@ -984,6 +1105,8 @@ int luaopen_x11(lua_State* L)
 {
     luaL_checkversion(L);
     luaR_stack(L);
+
+    XSetErrorHandler(handle_x11_error);
 
     lua_newtable(L);
 
