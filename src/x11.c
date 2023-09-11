@@ -603,7 +603,7 @@ static int setup_mk_screen(lua_State* L, struct xrandr* xrandr, Window root)
 {
     luaR_stack(L);
 
-    lua_createtable(L, 0, 6);
+    lua_createtable(L, 0, 8);
 
     if(luaL_newmetatable(L, TYPE_XRANDR_SCREEN)) {
     }
@@ -620,9 +620,13 @@ static int setup_mk_screen(lua_State* L, struct xrandr* xrandr, Window root)
 
     lua_pushinteger(L, XDisplayWidth(dpy, scr));
     lua_setfield(L, -2, "width");
-
     lua_pushinteger(L, XDisplayHeight(dpy, scr));
     lua_setfield(L, -2, "height");
+
+    lua_pushinteger(L, XDisplayWidthMM(dpy, scr));
+    lua_setfield(L, -2, "mmwidth");
+    lua_pushinteger(L, XDisplayHeightMM(dpy, scr));
+    lua_setfield(L, -2, "mmheight");
 
     int minWidth, minHeight, maxWidth, maxHeight;
     if(!XRRGetScreenSizeRange(dpy, root, &minWidth, &minHeight, &maxWidth, &maxHeight)) {

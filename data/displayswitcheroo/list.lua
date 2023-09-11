@@ -4,10 +4,11 @@ local dpy = X11.connect()
 local setup = dpy.xrandr:fetch();
 
 local screen = setup.screen
-print(string.format("screen %d: %dx%d (min %dx%d, max %dx%d) (window %d)",
+print(string.format("screen %d: %dx%d (min %dx%d, max %dx%d) (%dmm x %dmm) (window %d)",
     screen.number, screen.width, screen.height,
     screen.min.width, screen.min.height,
     screen.max.width, screen.max.height,
+    screen.mmwidth, screen.mmheight,
     screen.window))
 
 for n, o in pairs(setup.outputs) do
