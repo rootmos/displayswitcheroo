@@ -71,6 +71,11 @@ static int display_sync(lua_State* L)
     luaR_stack(L);
     struct display* display = luaL_checkudata(L, 1, TYPE_DISPLAY);
 
+    int check = 1;
+    if(lua_isboolean(L, 2)) {
+        check = lua_toboolean(L, 2);
+    }
+
     XSync(display->dpy, True);
 
     display_push_registry(L, display->dpy);
@@ -93,12 +98,52 @@ static int display_sync(lua_State* L)
     }
     lua_pop(L, 1); // olderrors reg
     luaR_stack_expect(L, 2); // olderrors reg
+    lua_remove(L, -2);// olderrors
 
-    lua_pushboolean(L, l == 0 ? 1 : 0); // status olderrors reg
-    lua_remove(L, -3);
-    lua_rotate(L, -2, 1);
+    if(check) {
+        char msg[4096];
+        size_t n = 0;
 
-    luaR_return(L, 2);
+        if(l == 1) {
+            lua_rawgeti(L, -1, 1);
+
+            const char* e = lua_tostring(L, -1);
+            if(e == NULL) {
+                failwith("unexpected error type");
+            }
+            int r = snprintf(msg, sizeof(msg), "X11 error: %s", e);
+            if(r >= sizeof(msg)) {
+                failwith("buffer overflow");
+            }
+        } else {
+            int r = snprintf(msg, sizeof(msg), "X11 errors: ");
+            if(r >= sizeof(msg)) {
+                failwith("buffer overflow");
+            }
+            n += r;
+
+            for(int i = 0; i < l; i++) {
+                lua_rawgeti(L, -1, i+1);
+
+                size_t k;
+                const char* e = lua_tolstring(L, -1, &k);
+                lua_pop(L, 1);
+
+                int r = snprintf(msg+n, sizeof(msg)-n, "\n  %s", e);
+                if(r >= sizeof(msg)-n) {
+                    failwith("buffer overflow");
+                }
+                n += r;
+            }
+        }
+
+        lua_pushstring(L, msg);
+        return lua_error(L);
+    } else {
+        lua_pushboolean(L, l == 0 ? 1 : 0); // status olderrors
+        lua_rotate(L, -2, 1); // olderrors status
+        luaR_return(L, 2);
+    }
 }
 
 static struct {
