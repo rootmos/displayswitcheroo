@@ -62,7 +62,43 @@ static int display_push_registry(lua_State* L, Display* dpy)
     if(t != LUA_TTABLE) {
         return luaL_error(L, "unexpected registry value");
     }
+
     luaR_return(L, 1);
+}
+
+static int display_sync(lua_State* L)
+{
+    luaR_stack(L);
+    struct display* display = luaL_checkudata(L, 1, TYPE_DISPLAY);
+
+    XSync(display->dpy, True);
+
+    display_push_registry(L, display->dpy);
+    luaR_stack_expect(L, 1);
+
+    if(lua_getfield(L, -1, "errors") != LUA_TTABLE) {
+        failwith("registry table's .errors has an unexpected type");
+    }
+    luaR_stack_expect(L, 2); // olderrors reg
+
+    lua_createtable(L, 0, 0); // newerrors olderrors reg
+    lua_setfield(L, -3, "errors"); // olderrors reg
+    luaR_stack_expect(L, 2); // olderrors reg
+
+    lua_len(L, -1); // #olderrors olderrors reg
+    int isnum;
+    int l = lua_tointegerx(L, -1, &isnum);
+    if(!isnum) {
+        failwith("len didn't return an integer");
+    }
+    lua_pop(L, 1); // olderrors reg
+    luaR_stack_expect(L, 2); // olderrors reg
+
+    lua_pushboolean(L, l == 0 ? 1 : 0); // status olderrors reg
+    lua_remove(L, -3);
+    lua_rotate(L, -2, 1);
+
+    luaR_return(L, 2);
 }
 
 static struct {
@@ -104,23 +140,31 @@ static lua_State* resolve_state(Display* dpy)
     failwith("state not registered: %p", dpy);
 }
 
-static int handle_x11_error(Display* dpy, XErrorEvent* e)
+static int push_lib_function(lua_State* L, const char* lib, const char* f)
 {
-    lua_State* L = resolve_state(dpy);
     luaR_stack(L);
 
     int t = lua_getglobal(L, "require");
     if(t != LUA_TFUNCTION) {
         failwith("require has unexpected type: %s", lua_typename(L, t));
     }
-    lua_pushliteral(L, "table");
+    lua_pushstring(L, lib);
     lua_call(L, 1, 1);
-    t = lua_getfield(L, -1, "insert");
+    t = lua_getfield(L, -1, f);
     if(t != LUA_TFUNCTION) {
-        failwith("table.insert has unexpected type: %s", lua_typename(L, t));
+        failwith("%s.%s has unexpected type: %s", lib, f, lua_typename(L, t));
     }
     lua_replace(L, -2);
-    luaR_stack_expect(L, 1); // table.insert
+
+    luaR_return(L, 1);
+}
+
+static int handle_x11_error(Display* dpy, XErrorEvent* e)
+{
+    lua_State* L = resolve_state(dpy);
+    luaR_stack(L);
+
+    push_lib_function(L, "table", "insert"); // table.insert
 
     display_push_registry(L, dpy);
     lua_getfield(L, -1, "errors");
@@ -197,6 +241,7 @@ struct setup {
 
     struct xrandr* xrandr;
 
+    Window root;
     XRRScreenResources* res;
 };
 
@@ -867,9 +912,56 @@ static int setup_disable_crtc(lua_State* L)
 static int setup_set_screen_size(lua_State* L)
 {
     luaR_stack(L);
-    /*struct setup* setup = luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);*/
+    struct setup* setup = luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);
     luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);
     luaL_checktype(L, 2, LUA_TTABLE);
+
+    int isnum;
+    int t = lua_getfield(L, 2, "width");
+    if(t != LUA_TNUMBER) {
+        return luaL_error(L, ".width is not a number: %s", lua_typename(L, t));
+    }
+    int width = lua_tointegerx(L, -1, &isnum);
+    if(!t) {
+        return luaL_error(L, ".width is not an integer");
+    }
+    lua_pop(L, 1);
+
+    t = lua_getfield(L, 2, "height");
+    if(t != LUA_TNUMBER) {
+        return luaL_error(L, ".height is not a number: %s", lua_typename(L, t));
+    }
+    int height = lua_tointegerx(L, -1, &isnum);
+    if(!t) {
+        return luaL_error(L, ".height is not an integer");
+    }
+    lua_pop(L, 1);
+
+    t = lua_getfield(L, 2, "mmwidth");
+    if(t != LUA_TNUMBER) {
+        return luaL_error(L, ".mmwidth is not a number: %s", lua_typename(L, t));
+    }
+    int mmwidth = lua_tointegerx(L, -1, &isnum);
+    if(!t) {
+        return luaL_error(L, ".mmwidth is not an integer");
+    }
+    lua_pop(L, 1);
+
+    t = lua_getfield(L, 2, "mmheight");
+    if(t != LUA_TNUMBER) {
+        return luaL_error(L, ".mmheight is not a number: %s", lua_typename(L, t));
+    }
+    int mmheight = lua_tointegerx(L, -1, &isnum);
+    if(!t) {
+        return luaL_error(L, ".mmheight is not an integer");
+    }
+    lua_pop(L, 1);
+
+    debug("setting screen size: %dx%d (%dmm x %dmm)", width, height, mmwidth, mmheight);
+
+    XRRSetScreenSize(setup->xrandr->display->dpy, setup->root,
+            width, height,
+            mmwidth, mmheight);
 
     luaR_return(L, 0);
 }
@@ -905,15 +997,15 @@ static int xrandr_fetch(lua_State* L)
 
     setup->xrandr = xrandr_ref(xrandr);
 
-    const Window root = XRootWindow(xrandr->display->dpy, XDefaultScreen(xrandr->display->dpy));
-    setup->res = XRRGetScreenResources(xrandr->display->dpy, root);
+    setup->root = XRootWindow(xrandr->display->dpy, XDefaultScreen(xrandr->display->dpy));
+    setup->res = XRRGetScreenResources(xrandr->display->dpy, setup->root);
     if(!setup->res) {
         failwith("XRRGetScreenResources failed");
     }
 
     lua_createtable(L, 0, 5);
     {
-        setup_mk_screen(L, xrandr, root);
+        setup_mk_screen(L, xrandr, setup->root);
         lua_setfield(L, -2, "screen");
 
         setup_mk_modes(L, setup->res);
@@ -922,10 +1014,10 @@ static int xrandr_fetch(lua_State* L)
         setup_mk_crtcs(L, xrandr, setup->res, -1);
         lua_setfield(L, -2, "crtcs");
 
-        setup_mk_outputs(L, xrandr, setup->res, -1, root);
+        setup_mk_outputs(L, xrandr, setup->res, -1, setup->root);
         lua_setfield(L, -2, "outputs");
 
-        setup_mk_monitors(L, xrandr, -1, root);
+        setup_mk_monitors(L, xrandr, -1, setup->root);
         lua_setfield(L, -2, "monitors");
     }
     lua_setiuservalue(L, -2, 1);
@@ -1074,6 +1166,8 @@ static int x11_connect(lua_State* L)
         luaR_failwith(L, "unable to connect to display %s", d);
     }
 
+    XSynchronize(display->dpy, False);
+
     register_state(display->dpy, L);
     display_init_registry(L, display);
 
@@ -1086,6 +1180,7 @@ static int x11_connect(lua_State* L)
 
     if(luaL_newmetatable(L, TYPE_DISPLAY)) {
         luaL_Reg l[] = {
+            { "sync", display_sync },
             { NULL, NULL },
         };
         luaL_newlib(L, l);
