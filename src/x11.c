@@ -966,6 +966,19 @@ static int setup_set_screen_size(lua_State* L)
     luaR_return(L, 0);
 }
 
+static int setup_set_primary(lua_State* L)
+{
+    luaR_stack(L);
+    struct setup* setup = luaL_checkudata(L, 1, TYPE_XRANDR_SETUP);
+    RROutput id = luaL_checkinteger(L, 2);
+
+    debug("setting primary output: %ld", id);
+
+    XRRSetOutputPrimary(setup->xrandr->display->dpy, setup->root, id);
+
+    luaR_return(L, 0);
+}
+
 static int setup_index(lua_State* L)
 {
     luaR_stack(L);
@@ -1027,6 +1040,7 @@ static int xrandr_fetch(lua_State* L)
             { "set_crtc", setup_set_crtc },
             { "disable_crtc", setup_disable_crtc },
             { "set_screen_size", setup_set_screen_size },
+            { "set_primary", setup_set_primary },
             { NULL, NULL },
         };
         luaL_newlib(L, l);
