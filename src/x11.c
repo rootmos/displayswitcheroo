@@ -10,6 +10,7 @@
 #include "x11.h"
 
 #define TYPE_DISPLAY "x11.display"
+#define TYPE_ATOM "x11.atom"
 #define TYPE_XRANDR "x11.xrandr"
 #define TYPE_XRANDR_CRTC "x11.xrandr.crtc"
 #define TYPE_XRANDR_OUTPUT "x11.xrandr.output"
@@ -310,6 +311,151 @@ static int setup_gc(lua_State* L)
     luaR_return(L, 0);
 }
 
+struct atom {
+    Atom id;
+    char* name;
+    struct display* display;
+};
+
+static int atom_gc(lua_State* L)
+{
+    luaR_stack(L);
+    struct atom* a = luaL_checkudata(L, 1, TYPE_ATOM);
+    XFree(a->name);
+    display_unref(a->display);
+    luaR_return(L, 0);
+}
+
+static int atom_name(lua_State* L, struct atom* a)
+{
+    luaR_stack(L);
+
+    if(!a->name) {
+        a->name = XGetAtomName(a->display->dpy, a->id);
+        if(!a->name) {
+            return luaL_error(L, "undefined atom: %lu", a->id);
+        }
+    }
+
+    lua_pushstring(L, a->name);
+    luaR_return(L, 1);
+}
+
+static int atom_tostring(lua_State* L)
+{
+    luaR_stack(L);
+    atom_name(L, luaL_checkudata(L, 1, TYPE_ATOM));
+    luaR_return(L, 1);
+}
+
+static int atom_index(lua_State* L)
+{
+    luaR_stack(L);
+    struct atom* a = luaL_checkudata(L, 1, TYPE_ATOM);
+    luaL_checkany(L, 2);
+
+    lua_pushliteral(L, "id");
+    if(lua_rawequal(L, 2, -1)) {
+        lua_pushinteger(L, a->id);
+        lua_replace(L, -2);
+        luaR_return(L, 1);
+    }
+    lua_pop(L, 1);
+
+    lua_pushliteral(L, "name");
+    if(lua_rawequal(L, 2, -1)) {
+        atom_name(L, a);
+        lua_replace(L, -2);
+        luaR_return(L, 1);
+    }
+
+    lua_pushnil(L);
+    luaR_return(L, 1);
+}
+
+static int atom_eq(lua_State* L)
+{
+    luaR_stack(L);
+    int at = lua_type(L, 1), aa = at == LUA_TUSERDATA ? luaR_testmetatable(L, 1, TYPE_ATOM) : 0;
+    int bt = lua_type(L, 2), ba = bt == LUA_TUSERDATA ? luaR_testmetatable(L, 2, TYPE_ATOM) : 0;
+
+    struct atom* a;
+    struct atom* b;
+    if(aa && ba) {
+        a = luaL_checkudata(L, 1, TYPE_ATOM);
+        b = luaL_checkudata(L, 2, TYPE_ATOM);
+        lua_pushboolean(L, a->id == b->id);
+        luaR_return(L, 1);
+    } else if(!aa && !ba) {
+        return luaL_error(L, "then why did you ask me?");
+    }
+
+    int arg, t;
+    struct atom* atom;
+    if(aa) {
+        atom = luaL_checkudata(L, 1, TYPE_ATOM);
+        arg = 2;
+        t = bt;
+    } else {
+        atom = luaL_checkudata(L, 2, TYPE_ATOM);
+        arg = 1;
+        t = at;
+    }
+
+    if(t == LUA_TNUMBER) {
+        int isnum;
+        lua_Integer id0 = lua_tointegerx(L, arg, &isnum);
+        if(!isnum) {
+            lua_pushboolean(L, 0);
+            luaR_return(L, 1);
+        }
+        lua_pushboolean(L, atom->id == id0);
+    } else {
+        lua_pushboolean(L, 0);
+    }
+
+    luaR_return(L, 1);
+}
+
+static int atom_mk_from_id(lua_State* L, struct display* display, Atom id)
+{
+    luaR_stack(L);
+
+    struct atom* atom = lua_newuserdatauv(L, sizeof(*atom), 0);
+    atom->id = id;
+    atom->name = NULL;
+    atom->display = display_ref(display);
+
+    if(luaL_newmetatable(L, TYPE_ATOM)) {
+        lua_pushcfunction(L, atom_eq);
+        lua_setfield(L, -2, "__eq");
+
+        lua_pushcfunction(L, atom_tostring);
+        lua_setfield(L, -2, "__tostring");
+
+        lua_pushcfunction(L, atom_index);
+        lua_setfield(L, -2, "__index");
+
+        lua_pushcfunction(L, atom_gc);
+        lua_setfield(L, -2, "__gc");
+    }
+    lua_setmetatable(L, -2);
+
+    luaR_return(L, 1);
+}
+
+static int atom_mk_from_str(lua_State* L, struct display* display, const char* str)
+{
+    luaR_stack(L);
+    Atom id = XInternAtom(display->dpy, str, False);
+    if(id == None) {
+        failwith("XInternAtom(%s) failed", str);
+    }
+
+    atom_mk_from_id(L, display, id);
+    luaR_return(L, 1);
+}
+
 static int crtc_mk(lua_State* L, int modes_index, RRCrtc id, XRRCrtcInfo* ci)
 {
     luaR_stack(L);
@@ -420,13 +566,85 @@ static int modes_is_preferred(lua_State* L)
     luaR_return(L, 1);
 }
 
-static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id, RROutput primary, XRROutputInfo* oi)
+static int output_property_mk(lua_State* L, struct display* display, RROutput output, Atom prop)
+{
+    Display* const dpy = display->dpy;
+
+    luaR_stack(L);
+
+    atom_mk_from_id(L, display, prop);
+    struct atom* aname = luaL_checkudata(L, -1, TYPE_ATOM);
+    atom_name(L, aname); // name aname
+
+    lua_createtable(L, 0, 3); // p name aname
+    lua_rotate(L, -3, -1); // aname p name
+    lua_setfield(L, -2, "name"); // p name
+
+    lua_pushinteger(L, prop);
+    lua_setfield(L, -2, "id");
+
+    Atom actual_type;
+    int actual_format;
+    unsigned long nitems, bytes_after;
+    unsigned char* value;
+
+    int s = XRRGetOutputProperty(dpy, output, prop,
+            0, 1024,
+            False /* delete */,
+            False /* pending */,
+            AnyPropertyType,
+            &actual_type, &actual_format,
+            &nitems, &bytes_after, &value);
+    if(s != Success) {
+        failwith("XRRGetOutputProperty(%lu, %s) failed", prop, aname->name);
+    }
+
+    XRRPropertyInfo* pi = XRRQueryOutputProperty(dpy, output, prop);
+    if(!pi) {
+        failwith("XRRQueryOutputProperty(%lu, %lu) failed", output, prop);
+    }
+
+    lua_pushboolean(L, pi->range);
+    lua_setfield(L, -2, "range");
+
+    lua_pushboolean(L, pi->immutable);
+    lua_setfield(L, -2, "immutable");
+
+    /*debug("%s: type=%s format=%d items=%lu", name, type, actual_format, nitems);*/
+
+    XFree(pi);
+
+    luaR_return(L, 2);
+}
+
+static int output_properties_mk(lua_State* L, struct display* display, RROutput output)
+{
+    luaR_stack(L);
+
+    int nprops;
+    Atom* props = XRRListOutputProperties(display->dpy, output, &nprops);
+    if(!props) {
+        failwith("XRRListOutputProperties(%lu) failed", output);
+    }
+
+    lua_createtable(L, 0, nprops);
+    for(int i = 0; i < nprops; i++) {
+        output_property_mk(L, display, output, props[i]);
+        lua_settable(L, -3);
+    }
+
+    XFree(props);
+
+    luaR_return(L, 1);
+}
+
+static int output_mk(lua_State* L, struct display* display, int modes_index, int crtcs_index, RROutput id, RROutput primary, XRROutputInfo* oi)
 {
     luaR_stack(L);
 
     lua_pushstring(L, oi->name);
 
-    lua_createtable(L, 0, 6);
+    lua_createtable(L, 0, 7);
     if(luaL_newmetatable(L, TYPE_XRANDR_OUTPUT)) {
     }
     lua_setmetatable(L, -2);
@@ -459,6 +677,9 @@ static int output_mk(lua_State* L, int modes_index, int crtcs_index, RROutput id
         lua_pushboolean(L, primary == id ? 1 : 0);
         lua_setfield(L, -2, "primary");
     }
+
+    output_properties_mk(L, display, id);
+    lua_setfield(L, -2, "properties");
 
     // modes
     lua_createtable(L, oi->nmode, 2);
@@ -771,7 +992,7 @@ static int setup_mk_outputs(lua_State* L, struct xrandr* xrandr, XRRScreenResour
             failwith("XRRGetOutputInfo(%lu) failed", id);
         }
 
-        output_mk(L, -1, -2, id, primary, oi);
+        output_mk(L, xrandr->display, -1, -2, id, primary, oi);
         lua_settable(L, -5);
 
         XRRFreeOutputInfo(oi);
@@ -1208,6 +1429,34 @@ static int display_index(lua_State* L)
     luaR_return(L, 1);
 }
 
+static int display_atom(lua_State* L)
+{
+    luaR_stack(L);
+    struct display* display = luaL_checkudata(L, 1, TYPE_DISPLAY);
+    int t = lua_type(L, 2);
+    if(t == LUA_TNONE) {
+        luaL_argerror(L, 2, "string or integer expected");
+    } else if(t == LUA_TNUMBER) {
+        int isnum;
+        lua_Integer id = lua_tointegerx(L, 2, &isnum);
+        if(!isnum) {
+            luaL_argerror(L, 2, "not an integer");
+        }
+        atom_mk_from_id(L, display, id);
+    } else if(t == LUA_TSTRING) {
+        const char* s = lua_tostring(L, 2);
+        if(!s) {
+            failwith("lua_tostring failed unexpectedly");
+        }
+
+        atom_mk_from_str(L, display, s);
+    } else {
+        return luaL_argerror(L, 2, "unexpected type");
+    }
+
+    luaR_return(L, 1);
+}
+
 static int x11_connect(lua_State* L)
 {
     luaR_stack(L);
@@ -1240,6 +1489,7 @@ static int x11_connect(lua_State* L)
     if(luaL_newmetatable(L, TYPE_DISPLAY)) {
         luaL_Reg l[] = {
             { "sync", display_sync },
+            { "atom", display_atom },
             { NULL, NULL },
         };
         luaL_newlib(L, l);
