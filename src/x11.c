@@ -5,6 +5,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
+#include <X11/Xatom.h>
 
 #include "r.h"
 #include "x11.h"
@@ -326,25 +327,18 @@ static int atom_gc(lua_State* L)
     luaR_return(L, 0);
 }
 
-static int atom_name(lua_State* L, struct atom* a)
+static const char* atom_name(struct atom* a)
 {
-    luaR_stack(L);
-
     if(!a->name) {
         a->name = XGetAtomName(a->display->dpy, a->id);
-        if(!a->name) {
-            return luaL_error(L, "undefined atom: %lu", a->id);
-        }
     }
-
-    lua_pushstring(L, a->name);
-    luaR_return(L, 1);
+    return a->name;
 }
 
 static int atom_tostring(lua_State* L)
 {
     luaR_stack(L);
-    atom_name(L, luaL_checkudata(L, 1, TYPE_ATOM));
+    lua_pushstring(L, atom_name(luaL_checkudata(L, 1, TYPE_ATOM)));
     luaR_return(L, 1);
 }
 
@@ -364,7 +358,7 @@ static int atom_index(lua_State* L)
 
     lua_pushliteral(L, "name");
     if(lua_rawequal(L, 2, -1)) {
-        atom_name(L, a);
+        lua_pushstring(L, atom_name(a));
         lua_replace(L, -2);
         luaR_return(L, 1);
     }
@@ -573,30 +567,38 @@ static int output_property_mk(lua_State* L, struct display* display, RROutput ou
     luaR_stack(L);
 
     atom_mk_from_id(L, display, prop);
-    struct atom* aname = luaL_checkudata(L, -1, TYPE_ATOM);
-    atom_name(L, aname); // name aname
+    struct atom* name = luaL_checkudata(L, -1, TYPE_ATOM);
+    lua_pushstring(L, atom_name(name));
 
-    lua_createtable(L, 0, 3); // p name aname
-    lua_rotate(L, -3, -1); // aname p name
-    lua_setfield(L, -2, "name"); // p name
+    lua_createtable(L, 0, 3);
+    lua_rotate(L, -3, -1);
+    lua_setfield(L, -2, "name");
 
     lua_pushinteger(L, prop);
     lua_setfield(L, -2, "id");
 
-    Atom actual_type;
-    int actual_format;
+    Atom type;
+    int format;
     unsigned long nitems, bytes_after;
     unsigned char* value;
 
-    int s = XRRGetOutputProperty(dpy, output, prop,
-            0, 1024,
-            False /* delete */,
-            False /* pending */,
-            AnyPropertyType,
-            &actual_type, &actual_format,
-            &nitems, &bytes_after, &value);
-    if(s != Success) {
-        failwith("XRRGetOutputProperty(%lu, %s) failed", prop, aname->name);
+    for(int length = 32;;) {
+        int s = XRRGetOutputProperty(dpy, output, prop,
+                0, length,
+                False /* delete */,
+                False /* pending */,
+                AnyPropertyType,
+                &type, &format,
+                &nitems, &bytes_after, &value);
+        if(s != Success) {
+            failwith("XRRGetOutputProperty(%lu, %s) failed", prop, atom_name(name));
+        }
+        if(bytes_after > 0) {
+            length <<= 1;
+            XFree(value);
+        } else {
+            break;
+        }
     }
 
     XRRPropertyInfo* pi = XRRQueryOutputProperty(dpy, output, prop);
@@ -604,13 +606,48 @@ static int output_property_mk(lua_State* L, struct display* display, RROutput ou
         failwith("XRRQueryOutputProperty(%lu, %lu) failed", output, prop);
     }
 
-    lua_pushboolean(L, pi->range);
-    lua_setfield(L, -2, "range");
-
     lua_pushboolean(L, pi->immutable);
     lua_setfield(L, -2, "immutable");
 
-    /*debug("%s: type=%s format=%d items=%lu", name, type, actual_format, nitems);*/
+    if(type == XA_ATOM) {
+        if(format != 32) {
+            failwith("unexpected format for property (%s) with type XA_ATOM: %d", atom_name(name), format);
+        }
+        if(nitems == 1) {
+            atom_mk_from_id(L, display, *((uint32_t*)value));
+        } else {
+            lua_createtable(L, nitems, 0);
+            uint32_t* is = (uint32_t*)value;
+            for(unsigned long i = 0; i < nitems; i++) {
+                atom_mk_from_id(L, display, is[i]);
+                lua_rawseti(L, -2, i + 1);
+            }
+        }
+    } else if(type == XA_INTEGER) {
+        if(nitems == 1) {
+            switch(format) {
+                case 8: lua_pushinteger(L, *((uint8_t*)value)); break;
+                case 16: lua_pushinteger(L, *((uint16_t*)value)); break;
+                case 32: lua_pushinteger(L, *((uint32_t*)value)); break;
+                default: failwith("unexpected format: %d", format);
+            }
+        } else {
+            lua_createtable(L, nitems, 0);
+            for(unsigned long i = 0; i < nitems; i++) {
+                switch(format) {
+                    case 8: lua_pushinteger(L, ((uint8_t*)value)[i]); break;
+                    case 16: lua_pushinteger(L, ((uint16_t*)value)[i]); break;
+                    case 32: lua_pushinteger(L, ((uint32_t*)value)[i]); break;
+                    default: failwith("unexpected format: %d", format);
+                }
+                lua_rawseti(L, -2, i + 1);
+            }
+        }
+    } else {
+        lua_pushnil(L);
+        warning("unhandled property type: %ld", type);
+    }
+    lua_setfield(L, -2, "value");
 
     XFree(pi);
 
