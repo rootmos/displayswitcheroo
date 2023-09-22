@@ -9,5 +9,5 @@ go() {
 }
 
 libr() {
-    "$HOME/git/libr/bundle" -o r.h logging lua xdg
+    "$HOME/git/libr/bundle" -o r.h logging lua xdg sha1
 }

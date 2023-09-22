@@ -20,10 +20,12 @@ READLINE_LDFLAGS += $(shell pkg-config --libs "$(READLINE_PKG)")
 .PHONY: build
 build: cli.exe x11.so
 
-cli.exe: cli.c x11.c r.c version.c
+SRC = x11.c edid.c r.c
+
+cli.exe: cli.c version.c $(SRC)
 	$(CC) $(CFLAGS) $(READLINE_CFLAGS) -o$@ $^ $(LDFLAGS) $(READLINE_LDFLAGS)
 
-x11.so: x11.c r.c
+x11.so: $(SRC)
 	$(CC) -rdynamic -fPIC -shared $(CFLAGS) -o$@ $^ $(LDFLAGS)
 
 .PHONY: clean
