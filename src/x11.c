@@ -96,7 +96,10 @@ static int display_sync(lua_State* L)
         char msg[4096];
         size_t n = 0;
 
-        if(l == 1) {
+        if(l == 0) {
+            lua_pop(L, 1);
+            luaR_return(L, 0);
+        } else if(l == 1) {
             lua_rawgeti(L, -1, 1);
 
             const char* e = lua_tostring(L, -1);

@@ -4,6 +4,10 @@ cli() {
     make LOG_LEVEL=DEBUG cli.exe && ./cli.exe "${1-list}"
 }
 
+switch() {
+    make LOG_LEVEL=WARN cli.exe && ./cli.exe switch.lua
+}
+
 go() {
     make LOG_LEVEL=DEBUG x11.so && lua "$K_DIR/../data/displayswitcheroo/list.lua"
 }

@@ -1,7 +1,5 @@
-local X11 = require("x11")
-local dpy = X11.connect()
-
-local setup = dpy.xrandr:fetch();
+local dpy = require("x11").connect()
+local setup = dpy.xrandr:fetch()
 
 local screen = setup.screen
 print(string.format("screen %d: %dx%d (min %dx%d, max %dx%d) (%dmm x %dmm) (window %d)",
