@@ -17,7 +17,7 @@ for n, o in pairs(setup.outputs) do
 
         local c = o.crtc
         local geom = c and string.format(" %dx%d+%d+%d", c.width, c.height, c.x, c.y) or ""
-        print(string.format("output %s:%s%s (%dmm x %dmm)", n, pri, geom, o.mmwidth, o.mmheight))
+        print(string.format("output %s:%s%s (%dmm x %dmm) (fpr 0x%x)", n, pri, geom, o.mmwidth, o.mmheight, o.fingerprint))
 
         local s, w, h
         for _, m in ipairs(o.modes) do

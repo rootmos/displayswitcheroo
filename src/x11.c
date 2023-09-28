@@ -676,6 +676,61 @@ static int output_properties_mk(lua_State* L, struct display* display, RROutput 
     luaR_return(L, 1);
 }
 
+static int output_push_EDID(lua_State* L, int idx)
+{
+    luaR_stack(L);
+    luaR_checkmetatable(L, idx, TYPE_XRANDR_OUTPUT);
+
+    int t = lua_getfield(L, 1, "properties"); // properties
+    if(t != LUA_TTABLE) {
+        return luaL_error(L, "output.properties has unexpected type: %s", lua_typename(L, t));
+    }
+    t = lua_getfield(L, -1, "EDID");
+    lua_replace(L, -2);
+    if(t == LUA_TNIL) {
+        return t;
+    } else if(t != LUA_TTABLE) {
+        return luaL_error(L, "output.properties[\"EDID\"] has unexpected type: %s", lua_typename(L, t));
+    }
+
+    lua_getfield(L, -1, "value");
+    lua_replace(L, -2);
+    luaR_stack_expect(L, 1);
+
+    return t;
+}
+
+static int output_index(lua_State* L)
+{
+    luaR_stack(L);
+    luaR_checkmetatable(L, 1, TYPE_XRANDR_OUTPUT);
+    luaL_checkany(L, 2);
+
+    lua_pushliteral(L, "EDID");
+    if(lua_rawequal(L, 2, -1)) {
+        lua_pop(L, 1);
+        output_push_EDID(L, 1);
+        luaR_return(L, 1);
+    }
+    lua_pop(L, 1);
+
+    lua_pushliteral(L, "fingerprint");
+    if(lua_rawequal(L, 2, -1)) {
+        lua_pop(L, 1);
+        int t = output_push_EDID(L, 1);
+        if(t == LUA_TNIL) {
+            luaR_return(L, 1);
+        }
+        lua_getfield(L, -1, "fingerprint");
+        lua_replace(L, -2);
+        luaR_return(L, 1);
+    }
+    lua_pop(L, 1);
+
+    lua_pushnil(L);
+    luaR_return(L, 1);
+}
+
 static int output_mk(lua_State* L, struct display* display, int modes_index, int crtcs_index, RROutput id, RROutput primary, XRROutputInfo* oi)
 {
     luaR_stack(L);
@@ -684,6 +739,8 @@ static int output_mk(lua_State* L, struct display* display, int modes_index, int
 
     lua_createtable(L, 0, 7);
     if(luaL_newmetatable(L, TYPE_XRANDR_OUTPUT)) {
+        lua_pushcfunction(L, output_index);
+        lua_setfield(L, -2, "__index");
     }
     lua_setmetatable(L, -2);
 
