@@ -4,6 +4,10 @@ cli() {
     make LOG_LEVEL=DEBUG cli.exe && ./cli.exe "${1-list}"
 }
 
+watch() {
+    make LOG_LEVEL=DEBUG cli.exe && ./cli.exe -w go.lua
+}
+
 switch() {
     make LOG_LEVEL=WARN cli.exe && ./cli.exe switch.lua
 }
@@ -13,5 +17,5 @@ go() {
 }
 
 libr() {
-    "$HOME/git/libr/bundle" -o r.h logging lua xdg sha1
+    "$HOME/git/libr/bundle" -o r.h logging lua xdg sha1 nonblock
 }

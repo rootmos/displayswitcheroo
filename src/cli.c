@@ -7,6 +7,7 @@
 #include "r.h"
 #include "version.h"
 #include "x11.h"
+#include "wait.h"
 
 #include <lua.h>
 #include <lauxlib.h>
@@ -110,6 +111,7 @@ static int openlibs(lua_State* L)
 struct options {
     const char* script;
     int interact;
+    int wait;
 };
 
 static void print_usage(int fd)
@@ -118,6 +120,7 @@ static void print_usage(int fd)
     dprintf(fd, "\n");
     dprintf(fd, "options:\n");
     dprintf(fd, "  -i       enter interactive mode after executing SCRIPT\n");
+    dprintf(fd, "  -w       wait for output connect/disconnects\n");
     dprintf(fd, "  -h       print this message\n");
     dprintf(fd, "  -v       print version information\n");
 }
@@ -129,10 +132,13 @@ static void parse_options(struct options* o, int argc, char* argv[])
     memset(o, 0, sizeof(*o));
 
     int res;
-    while((res = getopt(argc, argv, "ihv")) != -1) {
+    while((res = getopt(argc, argv, "iwhv")) != -1) {
         switch(res) {
         case 'i':
             o->interact = 1;
+            break;
+        case 'w':
+            o->wait = 1;
             break;
         case 'v':
             print_version(progname);
@@ -192,6 +198,11 @@ int main(int argc, char* argv[])
     parse_options(&o, argc, argv);
 
     xdg_init();
+
+    if(o.wait) {
+        run_wait_loop();
+        return 0;
+    }
 
     const char* script = resolve_script(&o);
     if(script) {

@@ -1,5 +1,5 @@
-// libr 0.4.0 (6999a977ba9a178084b34710c1f5c09c98e87f9f) (https://github.com/rootmos/libr.git) (2023-09-22T05:05:50+02:00)
-// modules: logging now lua fail util xdg path sha1
+// libr 0.4.0 (6999a977ba9a178084b34710c1f5c09c98e87f9f) (https://github.com/rootmos/libr.git) (2023-09-28T15:40:59+02:00)
+// modules: logging now lua fail util xdg path sha1 nonblock
 
 #ifndef LIBR_HEADER
 #define LIBR_HEADER
@@ -266,6 +266,10 @@ struct sha1_state {
 void sha1_init(struct sha1_state* st);
 void sha1_update(struct sha1_state* st, void* buf, size_t len);
 void sha1_finalize(struct sha1_state* st);
+
+// libr: nonblock.h
+
+void set_blocking(int fd, int blocking);
 #endif // LIBR_HEADER
 
 #ifdef LIBR_IMPLEMENTATION
@@ -1034,5 +1038,22 @@ void sha1_finalize(struct sha1_state* st_)
     for(size_t i = 0; i < 5; i++) {
         st->H[i] = htobe32(st->H[i]);
     }
+}
+
+// libr: nonblock.c
+
+#include <fcntl.h>
+
+void set_blocking(int fd, int blocking)
+{
+    int fl = fcntl(fd, F_GETFL, 0);
+    if(blocking) {
+        fl &= ~O_NONBLOCK;
+    } else {
+        fl |= O_NONBLOCK;
+    }
+
+    int r = fcntl(fd, F_SETFL, fl);
+    CHECK(r, "fcntl(%d, F_SETFL, %d)", fd, fl);
 }
 #endif // LIBR_IMPLEMENTATION
