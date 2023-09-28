@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
+#include <string.h>
 #include <sys/signalfd.h>
 #include <unistd.h>
 
@@ -12,9 +13,20 @@
 
 struct state {
     int running;
+    int pending_trigger;
+
     Display* dpy;
+    Window root;
+    int xrr_event_base;
+    int xrr_error_base;
 
     int sfd;
+
+    struct {
+        RROutput id;
+        char* name;
+        Connection connection;
+    } outputs[128];
 };
 
 static int handle_x11_error(Display* d, XErrorEvent* e)
@@ -48,10 +60,16 @@ static void x11_init(struct state* st)
         failwith("Xrandr has unsupported version: %d.%d < 1.2", major, minor);
     }
 
-    Window root = XRootWindow(st->dpy, XDefaultScreen(st->dpy));
-    info("tracking connection changes of %lu", root);
+    if(!XRRQueryExtension(st->dpy, &st->xrr_event_base, &st->xrr_error_base)) {
+        failwith("XRRQueryExtension failed");
+    }
 
-    XRRSelectInput(st->dpy, root, RROutputChangeNotifyMask);
+    st->root = XRootWindow(st->dpy, XDefaultScreen(st->dpy));
+    info("tracking connection changes of root window: %lu", st->root);
+
+    XRRSelectInput(st->dpy, st->root, RROutputChangeNotifyMask);
+
+    XSync(st->dpy, False);
 }
 
 static void x11_deinit(struct state* st)
@@ -64,6 +82,71 @@ static int x11_fd(const struct state* st)
     return XConnectionNumber(st->dpy);
 }
 
+static const char* connection2str(Connection c)
+{
+    switch(c) {
+        case RR_Connected: return "connected";
+        case RR_Disconnected: return "disconnected";
+        case RR_UnknownConnection: return "unknown connection";
+        default: failwith("unexpected connection value: %d", c);
+    }
+}
+
+static void outputs_init(struct state* st)
+{
+    XRRScreenResources* res = XRRGetScreenResourcesCurrent(st->dpy, st->root);
+    if(!res) {
+        failwith("XRRGetScreenResourcesCurrent failed");
+    }
+
+    if(res->noutput > LENGTH(st->outputs)) {
+        failwith("too many outputs!");
+    }
+
+    for(int i = 0; i < res->noutput; i++) {
+        RROutput id = st->outputs[i].id = res->outputs[i];
+        XRROutputInfo* oi = XRRGetOutputInfo(st->dpy, res, id);
+
+        if(!oi) {
+            failwith("XRRGetOutputInfo(%lu) failed", id);
+        }
+
+        char* name = st->outputs[i].name = strdup(oi->name);
+        CHECK_MALLOC(name);
+        st->outputs[i].connection = oi->connection;
+
+        debug("initial output %s: %s", name, connection2str(st->outputs[i].connection));
+
+        XRRFreeOutputInfo(oi);
+    }
+
+    for(int i = res->noutput; i < LENGTH(st->outputs); i++) {
+        st->outputs[i].id = 0;
+    }
+
+    XRRFreeScreenResources(res);
+}
+
+static int outputs_update(struct state* st, RROutput id, Connection c)
+{
+    for(size_t i = 0; i < LENGTH(st->outputs); i++) {
+        if(st->outputs[i].id == id) {
+            if(st->outputs[i].connection == c) {
+                debug("output %s: no change", st->outputs[i].name);
+                return 0;
+            } else {
+                info("output %s: %s -> %s", st->outputs[i].name, connection2str(st->outputs[i].connection), connection2str(c));
+                st->outputs[i].connection = c;
+                return 1;
+            }
+        } else if(st->outputs[i].id == 0) {
+            failwith("hot-plugging not implemented");
+        }
+    }
+
+    failwith("too many outputs!");
+}
+
 static void x11_handle_event(struct state* st)
 {
     while(XPending(st->dpy)) {
@@ -71,9 +154,23 @@ static void x11_handle_event(struct state* st)
         int r = XNextEvent(st->dpy, &ev);
         CHECK_IF(r != Success, "XNextEvent");
 
-        warning("ignored event: type=%d", ev.type);
+        const int rrnotify = st->xrr_event_base + RRNotify;
+        if(ev.type == rrnotify) {
+            XRRNotifyEvent* ne = (XRRNotifyEvent*)&ev;
+            if(ne->subtype == RRNotify_OutputChange) {
+                XRROutputChangeNotifyEvent* oc = (XRROutputChangeNotifyEvent*)ne;
+                if(outputs_update(st, oc->output, oc->connection)) {
+                    st->pending_trigger = 1;
+                }
+            } else {
+                warning("ignored RRNotify event: subttype=%d", ne->subtype);
+            }
+        } else {
+            warning("ignored event: type=%d", ev.type);
+        }
     }
 }
+
 
 static int signalfd_init(struct state* st)
 {
@@ -131,14 +228,16 @@ static void signalfd_handle_event(struct state* st)
     }
 }
 
-void run_wait_loop(void)
+void run_wait_loop(void (*trigger)(void*), void* opaque)
 {
     struct state st = {
         .running = 1,
+        .pending_trigger = 0,
     };
 
     signalfd_init(&st);
     x11_init(&st);
+    outputs_init(&st);
 
     struct pollfd fds[] = {
         { .fd = signalfd_fd(&st), .events = POLLIN },
@@ -165,6 +264,12 @@ void run_wait_loop(void)
                          "fds[%zu] = { .fd = %d, .revents = %hd }",
                          i, fds[i].fd, fds[i].revents);
             }
+        }
+
+        if(st.pending_trigger) {
+            debug("running trigger");
+            trigger(opaque);
+            st.pending_trigger = 0;
         }
     }
 

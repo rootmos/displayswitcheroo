@@ -192,19 +192,9 @@ static const char* resolve_script(const struct options* o)
     exit(1);
 }
 
-int main(int argc, char* argv[])
+void run(const struct options* o)
 {
-    struct options o;
-    parse_options(&o, argc, argv);
-
-    xdg_init();
-
-    if(o.wait) {
-        run_wait_loop();
-        return 0;
-    }
-
-    const char* script = resolve_script(&o);
+    const char* script = resolve_script(o);
     if(script) {
         info("resolved script: %s", script);
     }
@@ -217,7 +207,7 @@ int main(int argc, char* argv[])
     if(script) {
         int r = luaL_dofile(L, script);
         if(r == LUA_OK) {
-            if(o.interact) {
+            if(o->interact) {
                 run_repl(L);
             }
         } else {
@@ -230,6 +220,20 @@ int main(int argc, char* argv[])
     }
 
     lua_close(L);
+}
+
+int main(int argc, char* argv[])
+{
+    struct options o;
+    parse_options(&o, argc, argv);
+
+    xdg_init();
+
+    if(o.wait) {
+        run_wait_loop((void(*)(void*))run, &o);
+    } else {
+        run(&o);
+    }
 
     xdg_deinit();
 
