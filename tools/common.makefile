@@ -9,7 +9,7 @@ PKG_CONFIG ?= pkg-config
 CFLAGS ?= -Wall -Werror -O2
 LDFLAGS ?=
 
-LOG_LEVEL ?= WARN
+LOG_LEVEL ?= INFO
 CFLAGS += -DLOG_LEVEL=LOG_$(LOG_LEVEL)
 
 .PHONY: all

@@ -1215,7 +1215,6 @@ static int setup_set_crtc(lua_State* L)
     if(lua_getfield(L, 2, "outputs") != LUA_TTABLE) return luaL_error(L, ".outputs field is not at table or not present");
     lua_len(L, -1);
     int noutputs = lua_tointegerx(L, -1, &isnum);
-    debug("noutputs=%d", noutputs);
     if(!isnum) return luaL_error(L, "#.outputs is not an integer");
     lua_pop(L, 1);
     luaR_stack_expect(L, 1);
@@ -1225,7 +1224,6 @@ static int setup_set_crtc(lua_State* L)
     for(int i = 1, t = lua_rawgeti(L, -1, i); t != LUA_TNIL; lua_pop(L, 1), t = lua_rawgeti(L, -1, ++i)) {
         if(lua_getfield(L, -1, "id") == LUA_TNIL) return luaL_error(L, ".outputs[%d].id field not present", i);
         outputs[i-1] = lua_tointegerx(L, -1, &isnum);
-        debug("outputs[%d] = %ld", i, outputs[i-1]);
         if(!isnum) return luaL_error(L, ".outputs[%d].id field not an integer", i);
         lua_pop(L, 2);
     }

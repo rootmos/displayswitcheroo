@@ -4,6 +4,8 @@ local setup = dpy.xrandr:fetch()
 local int = setup.outputs["eDP-1"]
 local ext = setup.outputs["HDMI-2"]
 
+local cooloff = nil
+
 local function find_suitable_crtc(o)
     if o.crtc then
         return o.crtc
@@ -88,6 +90,9 @@ end
 if ext.fingerprint == 0x7ad8cb74 then
     print("desktop")
     left_right(ext, int)
+    if not ext.crtc then
+        cooloff = 10
+    end
 elseif ext.fingerprint == 0xc0e5ff0c then
     print("living room")
     one(ext)
@@ -97,3 +102,9 @@ else
 end
 
 dpy:sync()
+
+if cooloff then
+    print(string.format("letting monitors settle: %ds...", cooloff))
+    os.execute("sleep " .. cooloff)
+    print("  ...and were (hopefully) stable")
+end

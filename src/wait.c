@@ -65,7 +65,7 @@ static void x11_init(struct state* st)
     }
 
     st->root = XRootWindow(st->dpy, XDefaultScreen(st->dpy));
-    info("tracking connection changes of root window: %lu", st->root);
+    debug("tracking connection changes of root window: %lu", st->root);
 
     XRRSelectInput(st->dpy, st->root, RROutputChangeNotifyMask);
 

@@ -196,7 +196,7 @@ void run(const struct options* o)
 {
     const char* script = resolve_script(o);
     if(script) {
-        info("resolved script: %s", script);
+        debug("resolved script: %s", script);
     }
 
     lua_State* L = luaL_newstate();
@@ -205,6 +205,7 @@ void run(const struct options* o)
     openlibs(L);
 
     if(script) {
+        info("running script: %s", script);
         int r = luaL_dofile(L, script);
         if(r == LUA_OK) {
             if(o->interact) {
