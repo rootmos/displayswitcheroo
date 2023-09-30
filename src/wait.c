@@ -277,5 +277,5 @@ void run_wait_loop(void (*trigger)(void*), void* opaque)
     x11_deinit(&st);
     signalfd_deinit(&st);
 
-    info("bye");
+    debug("bye");
 }
