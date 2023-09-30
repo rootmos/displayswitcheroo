@@ -112,6 +112,7 @@ struct options {
     const char* script;
     int interact;
     int wait;
+    int once;
 };
 
 static void print_usage(int fd)
@@ -121,6 +122,7 @@ static void print_usage(int fd)
     dprintf(fd, "options:\n");
     dprintf(fd, "  -i       enter interactive mode after executing SCRIPT\n");
     dprintf(fd, "  -w       wait for output connect/disconnects\n");
+    dprintf(fd, "  -1       run once before waiting\n");
     dprintf(fd, "  -h       print this message\n");
     dprintf(fd, "  -v       print version information\n");
 }
@@ -132,13 +134,16 @@ static void parse_options(struct options* o, int argc, char* argv[])
     memset(o, 0, sizeof(*o));
 
     int res;
-    while((res = getopt(argc, argv, "iwhv")) != -1) {
+    while((res = getopt(argc, argv, "iw1hv")) != -1) {
         switch(res) {
         case 'i':
             o->interact = 1;
             break;
         case 'w':
             o->wait = 1;
+            break;
+        case '1':
+            o->once = 1;
             break;
         case 'v':
             print_version(progname);
@@ -231,6 +236,9 @@ int main(int argc, char* argv[])
     xdg_init();
 
     if(o.wait) {
+        if(o.once) {
+            run(&o);
+        }
         run_wait_loop((void(*)(void*))run, &o);
     } else {
         run(&o);
