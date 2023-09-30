@@ -108,6 +108,64 @@ static int openlibs(lua_State* L)
     luaR_return(L, 0);
 }
 
+static int add_xdg_to_search_paths(lua_State* L)
+{
+    luaR_stack(L);
+
+    int t = lua_getglobal(L, "package");
+    if(t != LUA_TTABLE) {
+        return luaL_error(L, "package has unexpected type: %s", lua_typename(L, t));
+    }
+
+    t = lua_getfield(L, -1, "path");
+    if(t != LUA_TSTRING) {
+        return luaL_error(L, "package.path has unexpected type: %s", lua_typename(L, t));
+    }
+    const char* orig_path = luaL_checkstring(L, -1);
+    lua_pop(L, 1);
+
+    t = lua_getfield(L, -1, "cpath");
+    if(t != LUA_TSTRING) {
+        return luaL_error(L, "package.cpath has unexpected type: %s", lua_typename(L, t));
+    }
+    const char* orig_cpath = luaL_checkstring(L, -1);
+    lua_pop(L, 1);
+
+    char path[4096];
+    int l = snprintf(LIT(path), "%s", orig_path);
+    if(l >= sizeof(path)) {
+        failwith("buffer overflow");
+    }
+
+    char cpath[4096];
+    int cl = snprintf(LIT(cpath), "%s", orig_cpath);
+    if(cl >= sizeof(cpath)) {
+        failwith("buffer overflow");
+    }
+
+    for(const char** p = xdg_dirs(xdg, XDG_DATA); *p != NULL; p++) {
+        l += snprintf(&path[l], sizeof(path) - l, ";%s/?.lua;%s/?/init.lua", *p, *p);
+        if(l >= sizeof(path)) {
+            failwith("pathfer overflow");
+        }
+
+        cl += snprintf(&cpath[cl], sizeof(cpath) - cl, ";%s/?.so", *p);
+        if(cl >= sizeof(cpath)) {
+            failwith("pathfer overflow");
+        }
+    }
+
+    lua_pushstring(L, path);
+    lua_setfield(L, -2, "path");
+
+    lua_pushstring(L, cpath);
+    lua_setfield(L, -2, "cpath");
+
+    lua_pop(L, 1);
+
+    luaR_return(L, 0);
+}
+
 struct options {
     const char* script;
     int interact;
@@ -216,6 +274,7 @@ void run(const struct options* o)
     CHECK_NOT(L, NULL, "unable to create Lua state");
 
     openlibs(L);
+    add_xdg_to_search_paths(L);
 
     if(script) {
         info("running script: %s", script);
