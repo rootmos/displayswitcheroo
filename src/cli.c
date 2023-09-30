@@ -170,24 +170,32 @@ static const char* resolve_script(const struct options* o)
         return o->script;
     }
 
-    debug("trying to resolve relative to XDG data dirs: %s", o->script);
-    const char* p = xdg_resolves(xdg, XDG_DATA, o->script, NULL);
-    if(p) {
-        return p;
-    }
+    // config
+    debug("trying to resolve relative to XDG config dirs: %s", o->script);
+    const char* p = xdg_resolves(xdg, XDG_CONFIG, o->script, NULL);
+    if(p) return p;
 
     static char buf[NAME_MAX];
     int r = snprintf(LIT(buf), "%s.lua", o->script);
-    if(r >= sizeof(buf)) {
-        failwith("buffer overflow");
-    }
+    if(r >= sizeof(buf)) failwith("buffer overflow");
+    debug("trying to resolve relative to XDG config dirs: %s", buf);
+    p = xdg_resolves(xdg, XDG_CONFIG, buf, NULL);
+    if(p) return p;
+
+
+    // data
+    debug("trying to resolve relative to XDG data dirs: %s", o->script);
+    p = xdg_resolves(xdg, XDG_DATA, o->script, NULL);
+    if(p) return p;
+
+    r = snprintf(LIT(buf), "%s.lua", o->script);
+    if(r >= sizeof(buf)) failwith("buffer overflow");
 
     debug("trying to resolve relative to XDG data dirs: %s", buf);
     p = xdg_resolves(xdg, XDG_DATA, buf, NULL);
-    if(p) {
-        return p;
-    }
+    if(p) return p;
 
+    // path
     debug("trying to resolve as path: %s", buf);
     if(stat(buf, &st) == 0) {
         return buf;
