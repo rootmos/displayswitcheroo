@@ -6,8 +6,11 @@ VERSION ?= $(TOOLS)/version
 CC = gcc
 PKG_CONFIG ?= pkg-config
 
-CFLAGS ?= -Wall -Werror -O2
+CFLAGS ?= -Wall -Werror -O1
 LDFLAGS ?=
+
+EXTRA_CFLAGS ?=
+EXTRA_LDFLAGS ?=
 
 LOG_LEVEL ?= INFO
 CFLAGS += -DLOG_LEVEL=LOG_$(LOG_LEVEL)

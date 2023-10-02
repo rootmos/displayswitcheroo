@@ -166,11 +166,93 @@ static int add_xdg_to_search_paths(lua_State* L)
     luaR_return(L, 0);
 }
 
+static lua_State* new_lua_state(void)
+{
+    lua_State* L = luaL_newstate();
+    CHECK_NOT(L, NULL, "unable to create Lua state");
+
+    openlibs(L);
+    add_xdg_to_search_paths(L);
+
+    return L;
+}
+
+static const char* resolve_script(const char* script)
+{
+    if(script == NULL) return NULL;
+
+    debug("trying to resolve as path: %s", script);
+    struct stat st;
+    if(stat(script, &st) == 0) {
+        return script;
+    }
+
+    // config
+    debug("trying to resolve relative to XDG config dirs: %s", script);
+    const char* p = xdg_resolves(xdg, XDG_CONFIG, script, NULL);
+    if(p) return p;
+
+    static char buf[NAME_MAX];
+    int r = snprintf(LIT(buf), "%s.lua", script);
+    if(r >= sizeof(buf)) failwith("buffer overflow");
+    debug("trying to resolve relative to XDG config dirs: %s", buf);
+    p = xdg_resolves(xdg, XDG_CONFIG, buf, NULL);
+    if(p) return p;
+
+
+    // data
+    debug("trying to resolve relative to XDG data dirs: %s", script);
+    p = xdg_resolves(xdg, XDG_DATA, script, NULL);
+    if(p) return p;
+
+    r = snprintf(LIT(buf), "%s.lua", script);
+    if(r >= sizeof(buf)) failwith("buffer overflow");
+
+    debug("trying to resolve relative to XDG data dirs: %s", buf);
+    p = xdg_resolves(xdg, XDG_DATA, buf, NULL);
+    if(p) return p;
+
+    // path
+    debug("trying to resolve as path: %s", buf);
+    if(stat(buf, &st) == 0) {
+        return buf;
+    }
+
+    dprintf(2, "unable to resolve script: %s\n", script);
+    exit(1);
+}
+
+static char* collect_fd(int fd, size_t* len)
+{
+    size_t l = 0, L = 4096;
+    char* buf = malloc(L);
+    CHECK_MALLOC(buf);
+
+    for(;;) {
+        int r = read(fd, &buf[l], L-l);
+        CHECK(r, "read(%d)", 0);
+        l += r;
+        if(r == 0) {
+            if(len) {
+                *len = l;
+            }
+            return buf;
+        }
+
+        if(l >= L) {
+            L <<= 1;
+            buf = realloc(buf, L);
+            CHECK_MALLOC(buf);
+        }
+    }
+}
+
 struct options {
     const char* script;
     int interact;
     int wait;
     int once;
+    int global;
 };
 
 static void print_usage(int fd)
@@ -181,6 +263,7 @@ static void print_usage(int fd)
     dprintf(fd, "  -i       enter interactive mode after executing SCRIPT\n");
     dprintf(fd, "  -w       wait for output connect/disconnects\n");
     dprintf(fd, "  -1       run once before waiting\n");
+    dprintf(fd, "  -g       keep global state between runs\n");
     dprintf(fd, "  -h       print this message\n");
     dprintf(fd, "  -v       print version information\n");
 }
@@ -192,7 +275,7 @@ static void parse_options(struct options* o, int argc, char* argv[])
     memset(o, 0, sizeof(*o));
 
     int res;
-    while((res = getopt(argc, argv, "iw1hv")) != -1) {
+    while((res = getopt(argc, argv, "iw1ghv")) != -1) {
         switch(res) {
         case 'i':
             o->interact = 1;
@@ -202,6 +285,9 @@ static void parse_options(struct options* o, int argc, char* argv[])
             break;
         case '1':
             o->once = 1;
+            break;
+        case 'g':
+            o->global = 1;
             break;
         case 'v':
             print_version(progname);
@@ -218,69 +304,36 @@ static void parse_options(struct options* o, int argc, char* argv[])
     }
 }
 
-static const char* resolve_script(const struct options* o)
+struct state {
+    struct options o;
+
+    const char* script;
+
+    char* stdin_buf;
+    size_t stdin_len;
+
+    lua_State* L0;
+};
+
+static void run(struct state* st)
 {
-    if(o->script == NULL) return NULL;
+    lua_State* L = st->L0 ? st->L0 : new_lua_state();
 
-    debug("trying to resolve as path: %s", o->script);
-    struct stat st;
-    if(stat(o->script, &st) == 0) {
-        return o->script;
-    }
+    if(st->script || st->stdin_buf) {
+        int r;
+        if(st->script) {
+            info("running script: %s", st->script);
+            r = luaL_dofile(L, st->script);
+        } else {
+            info("running script from stdin");
+            r = luaL_loadbuffer(L, st->stdin_buf, st->stdin_len, "stdin");
+            if(r == LUA_OK) {
+                r = lua_pcall(L, 0, LUA_MULTRET, 0);
+            }
+        }
 
-    // config
-    debug("trying to resolve relative to XDG config dirs: %s", o->script);
-    const char* p = xdg_resolves(xdg, XDG_CONFIG, o->script, NULL);
-    if(p) return p;
-
-    static char buf[NAME_MAX];
-    int r = snprintf(LIT(buf), "%s.lua", o->script);
-    if(r >= sizeof(buf)) failwith("buffer overflow");
-    debug("trying to resolve relative to XDG config dirs: %s", buf);
-    p = xdg_resolves(xdg, XDG_CONFIG, buf, NULL);
-    if(p) return p;
-
-
-    // data
-    debug("trying to resolve relative to XDG data dirs: %s", o->script);
-    p = xdg_resolves(xdg, XDG_DATA, o->script, NULL);
-    if(p) return p;
-
-    r = snprintf(LIT(buf), "%s.lua", o->script);
-    if(r >= sizeof(buf)) failwith("buffer overflow");
-
-    debug("trying to resolve relative to XDG data dirs: %s", buf);
-    p = xdg_resolves(xdg, XDG_DATA, buf, NULL);
-    if(p) return p;
-
-    // path
-    debug("trying to resolve as path: %s", buf);
-    if(stat(buf, &st) == 0) {
-        return buf;
-    }
-
-    dprintf(2, "unable to resolve script: %s\n", o->script);
-    exit(1);
-}
-
-void run(const struct options* o)
-{
-    const char* script = resolve_script(o);
-    if(script) {
-        debug("resolved script: %s", script);
-    }
-
-    lua_State* L = luaL_newstate();
-    CHECK_NOT(L, NULL, "unable to create Lua state");
-
-    openlibs(L);
-    add_xdg_to_search_paths(L);
-
-    if(script) {
-        info("running script: %s", script);
-        int r = luaL_dofile(L, script);
         if(r == LUA_OK) {
-            if(o->interact) {
+            if(st->o.interact) {
                 run_repl(L);
             }
         } else {
@@ -292,23 +345,36 @@ void run(const struct options* o)
         run_repl(L);
     }
 
-    lua_close(L);
+    if(!st->L0) {
+        lua_close(L);
+    }
 }
 
 int main(int argc, char* argv[])
 {
-    struct options o;
-    parse_options(&o, argc, argv);
+    struct state st;
+    memset(&st, 0, sizeof(st));
+    parse_options(&st.o, argc, argv);
+
+    st.L0 = st.o.global ? new_lua_state() : NULL;
 
     xdg_init();
 
-    if(o.wait) {
-        if(o.once) {
-            run(&o);
+    if(st.o.script) {
+        if(strcmp(st.o.script, "-") == 0) {
+            st.stdin_buf = collect_fd(0, &st.stdin_len);
+        } else {
+            st.script = resolve_script(st.o.script);
         }
-        run_wait_loop((void(*)(void*))run, &o);
+    }
+
+    if(st.o.wait) {
+        if(st.o.once) {
+            run(&st);
+        }
+        run_wait_loop((void(*)(void*))run, &st);
     } else {
-        run(&o);
+        run(&st);
     }
 
     xdg_deinit();

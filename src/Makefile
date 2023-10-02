@@ -23,7 +23,7 @@ build: cli.exe x11.so
 SRC = x11.c edid.c r.c
 
 cli.exe: cli.c version.c wait.c $(SRC)
-	$(CC) $(CFLAGS) $(READLINE_CFLAGS) -o$@ $^ $(LDFLAGS) $(READLINE_LDFLAGS)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(READLINE_CFLAGS) -o$@ $^ $(LDFLAGS) $(READLINE_LDFLAGS) $(EXTRA_LDFLAGS)
 
 x11.so: $(SRC)
 	$(CC) -rdynamic -fPIC -shared $(CFLAGS) -o$@ $^ $(LDFLAGS)
