@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -o nounset -o pipefail -o errexit
+
+OUTPUT=${1-/dev/stdout}
+EXE=${EXE-$2}
+APP=${APP-${3-$(basename "$EXE")}}
+
+TMP=$(mktemp)
+trap 'rm -f $TMP' EXIT
+
+echo '```' >> "$TMP"
+python3 - <<EOF >> "$TMP"
+import os
+import subprocess
+
+exe = os.environ["EXE"]
+app = os.environ["APP"]
+subprocess.run([app, "-h"], executable=exe)
+EOF
+echo '```' >> "$TMP"
+
+cp "$TMP" "$OUTPUT"

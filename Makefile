@@ -8,6 +8,11 @@ build:
 install:
 	./install.sh
 
+.PHONY: doc
+doc: build
+	$(MAKE) -C doc
+
 .PHONY: clean
 clean:
 	$(MAKE) -C src clean
+	$(MAKE) -C doc clean
