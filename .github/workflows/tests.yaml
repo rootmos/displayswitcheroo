@@ -11,6 +11,9 @@ jobs:
     - name: Check out repository code
       uses: actions/checkout@v4
 
+    - name: Prepare build environment
+      run: ./prepare.sh -us | tee -a "$GITHUB_ENV"
+
     - name: Build
       run: make build
 
