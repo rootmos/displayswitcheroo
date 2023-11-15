@@ -37,7 +37,7 @@ def is_clean(path, make=False, root=None, target=None, show_diff=False):
         subprocess.check_call(cmdline)
 
         with open(path, "rb") as f:
-            generated_digest = hashlib.file_digest(f, digest).hexdigest()
+            generated_digest = hashlib.new(digest, f.read()).hexdigest()
         logger.info(f"generated; {digest.upper()}: {generated_digest}")
         current_digest = generated_digest
 
