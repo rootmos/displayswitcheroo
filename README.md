@@ -1,6 +1,8 @@
 displayswitcheroo
 =================
 
+[![Tests](https://github.com/rootmos/displayswitcheroo/actions/workflows/tests.yaml/badge.svg)](https://github.com/rootmos/displayswitcheroo/actions/workflows/tests.yaml)
+
 A [Lua](https://lua.org) c-module wrapping the [XRandr](https://www.x.org/wiki/Projects/XRandR/) X11 extension,
 and a bundled command-line application with the ~~batteries~~ module included.
 

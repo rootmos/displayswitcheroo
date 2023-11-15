@@ -1,0 +1,36 @@
+name: Tests
+on:
+  push:
+  schedule:
+    - cron: "0 0 7 * *"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        image: [ "ubuntu:latest", "ubuntu:22.04", "archlinux:latest" ]
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    steps:
+    - name: Checkout prepare script
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: prepare.sh
+        sparse-checkout-cone-mode: false
+
+    - name: Prepare build environment
+      run: ./prepare.sh -u | tee -a "$GITHUB_ENV"
+
+    - name: Check out repository code
+      uses: actions/checkout@v4
+
+    - name: Correct ownership of repository
+      run: chown -R $(id -u):$(id -g) .
+
+    - name: Build
+      run: make build
+
+    - name: Check README.md
+      run: tools/is-clean --make --root=doc README.md
