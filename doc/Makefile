@@ -1,5 +1,5 @@
 THIS := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-ROOT ?= $(realpath $(THIS)/..)
+ROOT ?= ..
 TOOLS ?= $(ROOT)/tools
 
 export EXE ?= $(ROOT)/src/cli.exe
