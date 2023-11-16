@@ -17,13 +17,15 @@ EOF
     exit "${1-0}"
 }
 
+SUDO=${SUDO-}
 DESTDIR=${DESTDIR-$HOME/.local}
+DIR_MODE=0700
 APP=${APP-displayswitcheroo}
 while getopts "dusah-" OPT; do
     case $OPT in
         d) DESTDIR=$OPTARG ;;
-        u) DESTDIR=$HOME/.local ;;
-        s) DESTDIR=/usr ;;
+        u) DESTDIR=$HOME/.local; DIR_MODE=0700;;
+        s) DESTDIR=/usr; DIR_MODE=0755 ;;
         a) APP=$OPTARG ;;
         h) usage ;;
         -) break ;;
@@ -34,9 +36,10 @@ shift $((OPTIND-1))
 
 make -C "$SCRIPT_DIR" clean build EXTRA_CFLAGS="-DXDG_APP='\"$APP\"'"
 
-mkdir -pm 0700 "$DESTDIR/bin"
-install -v "$SCRIPT_DIR/src/cli.exe" "$DESTDIR/bin/$APP"
 
-mkdir -pm 0700 "$DESTDIR/share/$APP"
-install -v -D "$SCRIPT_DIR/data/displayswitcheroo/list.lua" "$DESTDIR/share/$APP/list.lua"
-install -v -D "$SCRIPT_DIR/data/displayswitcheroo/displayswitcheroo.lua" "$DESTDIR/share/$APP/$APP.lua"
+$SUDO mkdir -pm "$DIR_MODE" "$DESTDIR/bin"
+$SUDO install -v "$SCRIPT_DIR/src/cli.exe" "$DESTDIR/bin/$APP"
+
+$SUDO mkdir -pm "$DIR_MODE" "$DESTDIR/share/$APP"
+$SUDO install -v -D "$SCRIPT_DIR/data/displayswitcheroo/list.lua" "$DESTDIR/share/$APP/list.lua"
+$SUDO install -v -D "$SCRIPT_DIR/data/displayswitcheroo/displayswitcheroo.lua" "$DESTDIR/share/$APP/$APP.lua"

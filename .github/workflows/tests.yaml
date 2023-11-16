@@ -57,7 +57,7 @@ jobs:
         if [ "${{ matrix.kind }}" = "user" ]; then
             ./install.sh -u
         elif [ "${{ matrix.kind }}" = "system" ]; then
-            sudo ./install.sh -s
+            SUDO=sudo ./install.sh -s
         else
             exit 1
         fi
