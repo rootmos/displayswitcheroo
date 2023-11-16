@@ -15,38 +15,48 @@ for n, o in pairs(setup.outputs) do
 
         local c = o.crtc
         local geom = c and string.format(" %dx%d+%d+%d", c.width, c.height, c.x, c.y) or ""
-        print(string.format("output %s:%s%s (%dmm x %dmm) (fpr 0x%x)", n, pri, geom, o.mmwidth, o.mmheight, o.fingerprint))
+
+        local str = string.format("output %s:%s%s", n, pri, geom)
+        if o.mmwidth and o.mmheight then
+            str = str .. string.format(" (%dmm x %dmm)", o.mmwidth, o.mmheight)
+        end
+        if o.fingerprint then
+            str = str .. string.format(" (fpr 0x%x)", o.fingerprint)
+        end
+        print(str)
 
         local s, w, h
         for _, m in ipairs(o.modes) do
-            local flags = ""
-            if m.interlace then
-                flags = flags .. "i"
-            end
-
-            if m.double_scan then
-                flags = flags .. "d"
-            end
-
-            if o.modes:is_preferred(m) then
-                flags = flags .. "+"
-            end
-
-            if c and m == c.mode then
-                flags = flags .. "*"
-            end
-
-            local t = string.format(" %.2f%s", m.refresh_rate, flags)
-
-            if w == m.width and h == m.height then
-                s = s .. t
-            else
-                if s then
-                    print(s)
+            if m.refresh_rate then
+                local flags = ""
+                if m.interlace then
+                    flags = flags .. "i"
                 end
-                w = m.width
-                h = m.height
-                s = string.format("   %dx%d%s", w, h, t)
+
+                if m.double_scan then
+                    flags = flags .. "d"
+                end
+
+                if o.modes:is_preferred(m) then
+                    flags = flags .. "+"
+                end
+
+                if c and m == c.mode then
+                    flags = flags .. "*"
+                end
+
+                local t = string.format(" %.2f%s", m.refresh_rate, flags)
+
+                if w == m.width and h == m.height then
+                    s = s .. t
+                else
+                    if s then
+                        print(s)
+                    end
+                    w = m.width
+                    h = m.height
+                    s = string.format("   %dx%d%s", w, h, t)
+                end
             end
         end
         if s then

@@ -4,6 +4,11 @@ cli() {
     make LOG_LEVEL=DEBUG cli.exe && ./cli.exe "${1-list}"
 }
 
+xvfb() {
+    make LOG_LEVEL=DEBUG cli.exe && xvfb-run ./cli.exe "$K_DIR/../data/displayswitcheroo/list.lua"
+}
+
+
 watch() {
     make LOG_LEVEL=DEBUG cli.exe && ./cli.exe -w go.lua
 }

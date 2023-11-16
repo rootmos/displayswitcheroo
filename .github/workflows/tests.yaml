@@ -52,7 +52,7 @@ jobs:
     - name: Prepare build environment
       run: ./prepare.sh -us | tee -a "$GITHUB_ENV"
 
-    - name: Install
+    - name: Install (${{ matrix.kind }})
       run: |
         if [ "${{ matrix.kind }}" = "user" ]; then
             ./install.sh -u
@@ -61,3 +61,6 @@ jobs:
         else
             exit 1
         fi
+
+    - name: Run tests
+      run: ./tests.sh
