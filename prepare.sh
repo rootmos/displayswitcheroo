@@ -18,7 +18,7 @@ done
 shift $((OPTIND-1))
 
 if [ -z "$DISTRO" ]; then
-    if command -v lsb_release; then
+    if command -v lsb_release >/dev/null; then
         DISTRO=$(lsb_release -is)
     elif command -v pacman >/dev/null; then
         DISTRO="Arch"

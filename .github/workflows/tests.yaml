@@ -17,6 +17,7 @@ jobs:
     - name: Checkout prepare script
       uses: actions/checkout@v4
       with:
+        fetch-depth: 1
         sparse-checkout: prepare.sh
         sparse-checkout-cone-mode: false
 
@@ -34,3 +35,29 @@ jobs:
 
     - name: Check README.md
       run: tools/is-clean --make --root=doc README.md
+
+  test:
+    needs: build
+    continue-on-error: true
+    strategy:
+      matrix:
+        kind: [ "system", "user" ]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Prepare build environment
+      run: ./prepare.sh -us | tee -a "$GITHUB_ENV"
+
+    - name: Install
+      run: |
+        if [ "${{ matrix.kind }}" = "user" ]; then
+            ./install.sh -u
+        elif [ "${{ matrix.kind }}" = "system" ]; then
+            sudo ./install.sh -s
+        else
+            exit 1
+        fi
