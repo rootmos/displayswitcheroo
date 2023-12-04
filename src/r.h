@@ -1,8 +1,14 @@
-// libr 0.4.0 (6999a977ba9a178084b34710c1f5c09c98e87f9f) (https://github.com/rootmos/libr.git) (2023-09-28T15:40:59+02:00)
+// libr 0.5.0 (ec3c888754c9966a470ff5a8d1baf1cfaa3045d2) (https://github.com/rootmos/libr.git) (2023-12-04T13:27:09+01:00)
 // modules: logging now lua fail util xdg path sha1 nonblock
 
 #ifndef LIBR_HEADER
 #define LIBR_HEADER
+
+#define LIBR(x) x
+#define PRIVATE __attribute__((visibility("hidden")))
+#define PUBLIC __attribute__((visibility("default")))
+#define API PRIVATE
+
 
 // libr: logging.h
 
@@ -19,64 +25,70 @@
 #define LOG_LEVEL LOG_INFO
 #endif
 
+extern int LIBR(logger_fd);
+
 #define __r_log(level, format, ...) do { \
-    r_log(level, __extension__ __FUNCTION__, __extension__ __FILE__, \
+    LIBR(logger)(level, __extension__ __FUNCTION__, __extension__ __FILE__, \
           __extension__ __LINE__, format "\n", ##__VA_ARGS__); \
 } while(0)
 
 #ifdef __cplusplus
-void r_dummy(...);
+void LIBR(dummy)(...);
 #else
-void r_dummy();
+void LIBR(dummy)();
 #endif
 
 #if LOG_LEVEL >= LOG_ERROR
 #define error(format, ...) __r_log(LOG_ERROR, format, ##__VA_ARGS__)
 #else
-#define error(format, ...) do { if(0) r_dummy(__VA_ARGS__); } while(0)
+#define error(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_WARNING
 #define warning(format, ...) __r_log(LOG_WARNING, format, ##__VA_ARGS__)
 #else
-#define warning(format, ...) do { if(0) r_dummy(__VA_ARGS__); } while(0)
+#define warning(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_INFO
 #define info(format, ...) __r_log(LOG_INFO, format, ##__VA_ARGS__)
 #else
-#define info(format, ...) do { if(0) r_dummy(__VA_ARGS__); } while(0)
+#define info(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_DEBUG
 #define debug(format, ...) __r_log(LOG_DEBUG, format, ##__VA_ARGS__)
 #else
-#define debug(format, ...) do { if(0) r_dummy(__VA_ARGS__); } while(0)
+#define debug(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_TRACE
 #define trace(format, ...) __r_log(LOG_TRACE, format, ##__VA_ARGS__)
 #else
-#define trace(format, ...) do { if(0) r_dummy(__VA_ARGS__); } while(0)
+#define trace(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
 #endif
 
-void r_log(int level,
-           const char* const caller,
-           const char* const file,
-           const unsigned int line,
-           const char* const fmt, ...)
-    __attribute__ ((format (printf, 5, 6)));
+void LIBR(logger)(
+    int level,
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const char* const fmt, ...)
+__attribute__ ((format (printf, 5, 6)));
 
-void r_vlog(int level,
-            const char* const caller,
-            const char* const file,
-            const unsigned int line,
-            const char* const fmt, va_list vl);
+void LIBR(vlogger)(
+    int level,
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const char* const fmt,
+    va_list vl
+);
 
 // libr: now.h
 
 // returns current time formated as compact ISO8601: 20190123T182628Z
-const char* now_iso8601_compact(void);
+const char* LIBR(now_iso8601_compact)(void);
 
 // libr: lua.h
 
@@ -84,24 +96,26 @@ const char* now_iso8601_compact(void);
 
 #define CHECK_LUA(L, err, format, ...) do { \
     if(err != LUA_OK) { \
-        r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
-                   __extension__ __LINE__, 0, \
-                   format ": %s\n", ##__VA_ARGS__, lua_tostring(L, -1)); \
+        LIBR(failwith0)( \
+            __extension__ __FUNCTION__, __extension__ __FILE__, \
+            __extension__ __LINE__, 0, \
+            format ": %s\n", ##__VA_ARGS__, lua_tostring(L, -1)); \
     } \
 } while(0)
 
 #define LUA_EXPECT_TYPE(L, t, expected, format, ...) do { \
-    if(t != expected) {\
-        r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
-                   __extension__ __LINE__, 0, \
-                   format ": unexpected type %s (expected %s)\n", \
-                   ##__VA_ARGS__, lua_typename(L, t), \
-                   lua_typename(L, expected)); \
+    if(t != expected) { \
+        LIBR(failwith0)( \
+            __extension__ __FUNCTION__, __extension__ __FILE__, \
+            __extension__ __LINE__, 0, \
+            format ": unexpected type %s (expected %s)\n", \
+            ##__VA_ARGS__, lua_typename(L, t), \
+            lua_typename(L, expected)); \
     } \
 } while(0)
 
 #ifndef LUA_STACK_MARKER
-#define LUA_STACK_MARKER __luaR_stack_marker
+#define LUA_STACK_MARKER LIBR(luaR_stack_marker)
 #endif
 
 #define luaR_stack(L) int LUA_STACK_MARKER = lua_gettop(L)
@@ -120,21 +134,22 @@ const char* now_iso8601_compact(void);
 } while(0)
 
 #define luaR_failwith(L, format, ...) \
-    r_lua_failwith(L, \
+    LIBR(luaR_failwith0)(L, \
             __extension__ __FUNCTION__, \
             __extension__ __FILE__, \
             __extension__ __LINE__, \
             format, ##__VA_ARGS__)
 
-void r_lua_failwith(lua_State* L,
-                    const char* const caller,
-                    const char* const file,
-                    const unsigned int line,
-                    const char* const fmt, ...)
-    __attribute__ ((noreturn, format (printf, 5, 6)));
+void LIBR(luaR_failwith0)(
+    lua_State* L,
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const char* const fmt, ...)
+__attribute__ ((noreturn, format (printf, 5, 6)));
 
-int luaR_testmetatable(lua_State* L, int arg, const char* tname);
-void luaR_checkmetatable(lua_State* L, int arg, const char* tname);
+int LIBR(luaR_testmetatable)(lua_State* L, int arg, const char* tname);
+void LIBR(luaR_checkmetatable)(lua_State* L, int arg, const char* tname);
 
 // libr: fail.h
 
@@ -145,9 +160,9 @@ void luaR_checkmetatable(lua_State* L, int arg, const char* tname);
 
 #define CHECK_IF(cond, format, ...) do { \
     if(cond) { \
-        r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
-                   __extension__ __LINE__, 1, \
-                   format "\n", ##__VA_ARGS__); \
+        LIBR(failwith0)(__extension__ __FUNCTION__, __extension__ __FILE__, \
+            __extension__ __LINE__, 1, \
+            format "\n", ##__VA_ARGS__); \
     } \
 } while(0)
 
@@ -155,17 +170,18 @@ void luaR_checkmetatable(lua_State* L, int arg, const char* tname);
 #define CHECK_MMAP(x) CHECK_NOT(x, MAP_FAILED, "memory mapping failed")
 
 #define failwith(format, ...) \
-    r_failwith(__extension__ __FUNCTION__, __extension__ __FILE__, \
-               __extension__ __LINE__, 0, format "\n", ##__VA_ARGS__)
+    LIBR(failwith0)(__extension__ __FUNCTION__, __extension__ __FILE__, \
+        __extension__ __LINE__, 0, format "\n", ##__VA_ARGS__)
 
-#define not_implemented() failwith("not implemented")
+#define not_implemented() LIBR(failwith0)("not implemented")
 
-void r_failwith(const char* const caller,
-                const char* const file,
-                const unsigned int line,
-                const int include_errno,
-                const char* const fmt, ...)
-    __attribute__ ((noreturn, format (printf, 5, 6)));
+void LIBR(failwith0)(
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const int include_errno,
+    const char* const fmt, ...)
+__attribute__ ((noreturn, format (printf, 5, 6)));
 
 // libr: util.h
 
@@ -208,31 +224,31 @@ enum xdg_kind {
     XDG_KINDS,
 };
 
-struct xdg* xdg_new(const char* app);
-void xdg_free(struct xdg* xdg);
+struct xdg* LIBR(xdg_new)(const char* app);
+void LIBR(xdg_free)(struct xdg* xdg);
 
-const char* xdg_dir(struct xdg* xdg, enum xdg_kind k);
-const char** xdg_dirs(struct xdg* xdg, enum xdg_kind k);
+const char* LIBR(xdg_dir)(struct xdg* xdg, enum xdg_kind k);
+const char** LIBR(xdg_dirs)(struct xdg* xdg, enum xdg_kind k);
 
-const char* xdg_home(struct xdg* xdg);
-const char* xdg_data_home(struct xdg* xdg);
-const char* xdg_config_home(struct xdg* xdg);
-const char* xdg_state_home(struct xdg* xdg);
-const char* xdg_cache_home(struct xdg* xdg);
-const char* xdg_runtime(struct xdg* xdg);
+const char* LIBR(xdg_home)(struct xdg* xdg);
+const char* LIBR(xdg_data_home)(struct xdg* xdg);
+const char* LIBR(xdg_config_home)(struct xdg* xdg);
+const char* LIBR(xdg_state_home)(struct xdg* xdg);
+const char* LIBR(xdg_cache_home)(struct xdg* xdg);
+const char* LIBR(xdg_runtime)(struct xdg* xdg);
 
-const char** xdg_data_dirs(struct xdg* xdg);
-const char** xdg_config_dirs(struct xdg* xdg);
+const char** LIBR(xdg_data_dirs)(struct xdg* xdg);
+const char** LIBR(xdg_config_dirs)(struct xdg* xdg);
 
-const char* xdg_resolve(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...);
-const char* xdg_resolvev(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps);
-const char* xdg_resolves(struct xdg* xdg, enum xdg_kind k, ...);
-const char* xdg_resolvevs(struct xdg* xdg, enum xdg_kind k, va_list ps);
+const char* LIBR(xdg_resolve)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...);
+const char* LIBR(xdg_resolvev)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps);
+const char* LIBR(xdg_resolves)(struct xdg* xdg, enum xdg_kind k, ...);
+const char* LIBR(xdg_resolvevs)(struct xdg* xdg, enum xdg_kind k, va_list ps);
 
-const char* xdg_preparev(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps);
-const char* xdg_prepare(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...);
-const char* xdg_preparevs(struct xdg* xdg, enum xdg_kind k, va_list ps);
-const char* xdg_prepares(struct xdg* xdg, enum xdg_kind k, ...);
+const char* LIBR(xdg_preparev)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps);
+const char* LIBR(xdg_prepare)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...);
+const char* LIBR(xdg_preparevs)(struct xdg* xdg, enum xdg_kind k, va_list ps);
+const char* LIBR(xdg_prepares)(struct xdg* xdg, enum xdg_kind k, ...);
 
 // libr: path.h
 
@@ -240,16 +256,16 @@ const char* xdg_prepares(struct xdg* xdg, enum xdg_kind k, ...);
 #include <stddef.h>
 #include <sys/types.h>
 
-size_t path_join(char* buf, size_t L, const char* p0, ...);
-size_t path_joinv(char* buf, size_t L, const char* p0, va_list ps);
+size_t LIBR(path_join)(char* buf, size_t L, const char* p0, ...);
+size_t LIBR(path_joinv)(char* buf, size_t L, const char* p0, va_list ps);
 
 // using static buffer
 #ifdef failwith
-const char* path_joins(const char* p0, ...);
-const char* path_joinvs(const char* p0, va_list ps);
+const char* LIBR(path_joins)(const char* p0, ...);
+const char* LIBR(path_joinvs)(const char* p0, va_list ps);
 #endif
 
-int makedirs(const char* path, mode_t mode);
+int LIBR(makedirs)(const char* path, mode_t mode);
 
 // libr: sha1.h
 
@@ -263,13 +279,13 @@ struct sha1_state {
     uint8_t _internal[84];
 };
 
-void sha1_init(struct sha1_state* st);
-void sha1_update(struct sha1_state* st, void* buf, size_t len);
-void sha1_finalize(struct sha1_state* st);
+void LIBR(sha1_init)(struct sha1_state* st);
+void LIBR(sha1_update)(struct sha1_state* st, const void* buf, size_t len);
+void LIBR(sha1_finalize)(struct sha1_state* st);
 
 // libr: nonblock.h
 
-void set_blocking(int fd, int blocking);
+void LIBR(set_blocking)(int fd, int blocking);
 #endif // LIBR_HEADER
 
 #ifdef LIBR_IMPLEMENTATION
@@ -281,35 +297,45 @@ void set_blocking(int fd, int blocking);
 #include <stdlib.h>
 
 #ifdef __cplusplus
-void r_dummy(...)
+API void LIBR(dummy)(...)
 #else
-void r_dummy()
+API void LIBR(dummy)()
 #endif
 {
     abort();
 }
 
-void r_vlog(int level,
-            const char* const caller,
-            const char* const file,
-            const unsigned int line,
-            const char* const fmt, va_list vl)
-{
-    fprintf(stderr, "%s:%d:%s:%s:%u ",
-            now_iso8601_compact(), getpid(), caller, file, line);
+int LIBR(logger_fd) API = 2;
 
-    vfprintf(stderr, fmt, vl);
+API void LIBR(vlogger)(
+    int level,
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const char* const fmt, va_list vl)
+{
+    int r = dprintf(LIBR(logger_fd), "%s:%d:%s:%s:%u ",
+        LIBR(now_iso8601_compact)(), getpid(), caller, file, line);
+    if(r < 0) {
+        abort();
+    }
+
+    r = vdprintf(LIBR(logger_fd), fmt, vl);
+    if(r < 0) {
+        abort();
+    }
 }
 
-void r_log(int level,
-           const char* const caller,
-           const char* const file,
-           const unsigned int line,
-           const char* const fmt, ...)
+API void LIBR(logger)(
+    int level,
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const char* const fmt, ...)
 {
     va_list vl;
     va_start(vl, fmt);
-    r_vlog(level, caller, file, line, fmt, vl);
+    LIBR(vlogger)(level, caller, file, line, fmt, vl);
     va_end(vl);
 }
 
@@ -318,7 +344,7 @@ void r_log(int level,
 #include <time.h>
 #include <stdlib.h>
 
-const char* now_iso8601_compact(void)
+PRIVATE const char* LIBR(now_iso8601_compact)(void)
 {
     static char buf[17];
     const time_t t = time(NULL);
@@ -336,7 +362,8 @@ const char* now_iso8601_compact(void)
 #include <lua.h>
 #include <lauxlib.h>
 
-void r_lua_failwith(lua_State* L,
+API void LIBR(luaR_failwith0)(
+    lua_State* L,
     const char* const caller,
     const char* const file,
     const unsigned int line,
@@ -370,7 +397,7 @@ void r_lua_failwith(lua_State* L,
     }
 }
 
-int luaR_testmetatable(lua_State* L, int arg, const char* tname)
+API int LIBR(luaR_testmetatable)(lua_State* L, int arg, const char* tname)
 {
     if(lua_getmetatable(L, arg)) {
         luaL_getmetatable(L, tname);
@@ -381,9 +408,9 @@ int luaR_testmetatable(lua_State* L, int arg, const char* tname)
     return 0;
 }
 
-void luaR_checkmetatable(lua_State* L, int arg, const char* tname)
+API void LIBR(luaR_checkmetatable)(lua_State* L, int arg, const char* tname)
 {
-    luaL_argexpected(L, luaR_testmetatable(L, arg, tname), arg, tname);
+    luaL_argexpected(L, LIBR(luaR_testmetatable)(L, arg, tname), arg, tname);
 }
 
 // libr: fail.c
@@ -393,20 +420,23 @@ void luaR_checkmetatable(lua_State* L, int arg, const char* tname)
 #include <stdio.h>
 #include <string.h>
 
-void r_failwith(const char* const caller,
-                const char* const file,
-                const unsigned int line,
-                const int include_errno,
-                const char* const fmt, ...)
+API void LIBR(failwith0)(
+    const char* const caller,
+    const char* const file,
+    const unsigned int line,
+    const int include_errno,
+    const char* const fmt, ...)
 {
     va_list vl;
     va_start(vl, fmt);
 
     if(include_errno) {
-        r_log(LOG_ERROR, caller, file, line, "(%s) ", strerror(errno));
-        vfprintf(stderr, fmt, vl);
+        LIBR(logger)(LOG_ERROR, caller, file, line, "(%s) ", strerror(errno));
+        if(vdprintf(LIBR(logger_fd), fmt, vl) < 0) {
+            abort();
+        }
     } else {
-        r_vlog(LOG_ERROR, caller, file, line, fmt, vl);
+        LIBR(vlogger)(LOG_ERROR, caller, file, line, fmt, vl);
     }
     va_end(vl);
 
@@ -431,7 +461,7 @@ struct xdg {
     char** dirs[XDG_KINDS];
 };
 
-struct xdg* xdg_new(const char* app)
+API struct xdg* LIBR(xdg_new)(const char* app)
 {
     struct xdg* xdg = calloc(1, sizeof(*xdg));
     CHECK_MALLOC(xdg);
@@ -451,7 +481,7 @@ struct xdg* xdg_new(const char* app)
     return xdg;
 }
 
-void xdg_free(struct xdg* xdg)
+API void LIBR(xdg_free)(struct xdg* xdg)
 {
     if(xdg == NULL) return;
 
@@ -476,7 +506,7 @@ static size_t xdg_check_path(const char* p)
 static size_t xdg_append_app(const struct xdg* xdg, char* buf, size_t L, const char* p)
 {
     if(xdg->app[0]) {
-        size_t l = path_join(buf, L, p, xdg->app, NULL);
+        size_t l = LIBR(path_join)(buf, L, p, xdg->app, NULL);
         if(l >= L) {
             failwith("buffer overflow");
         }
@@ -487,7 +517,7 @@ static size_t xdg_append_app(const struct xdg* xdg, char* buf, size_t L, const c
     }
 }
 
-static size_t xdg_fallback_runtime_dir(char* buf, size_t L)
+static size_t LIBR(xdg_fallback_runtime_dir)(char* buf, size_t L)
 {
     char template[NAME_MAX];
     size_t n = snprintf(LIT(template), "/tmp/xdg-runtime-fallback-%d-XXXXXX", geteuid());
@@ -502,7 +532,7 @@ static size_t xdg_fallback_runtime_dir(char* buf, size_t L)
     return snprintf(buf, L, "%s", tmp);
 }
 
-const char* xdg_dir(struct xdg* xdg, enum xdg_kind k)
+API const char* LIBR(xdg_dir)(struct xdg* xdg, enum xdg_kind k)
 {
     if(xdg->dir[k]) return xdg->dir[k];
 
@@ -532,23 +562,23 @@ const char* xdg_dir(struct xdg* xdg, enum xdg_kind k)
 
     const char* e = getenv(v);
     if(xdg_check_path(e)) {
-        l = path_join(LIT(buf), e, NULL);
+        l = LIBR(path_join)(LIT(buf), e, NULL);
     } else {
         switch(k) {
             case XDG_DATA:
-                l = path_join(LIT(buf), xdg_home(xdg), ".local", "share", NULL);
+                l = LIBR(path_join)(LIT(buf), LIBR(xdg_home)(xdg), ".local", "share", NULL);
                 break;
             case XDG_CONFIG:
-                l = path_join(LIT(buf), xdg_home(xdg), ".config", NULL);
+                l = LIBR(path_join)(LIT(buf), LIBR(xdg_home)(xdg), ".config", NULL);
                 break;
             case XDG_STATE:
-                l = path_join(LIT(buf), xdg_home(xdg), ".local", "state", NULL);
+                l = LIBR(path_join)(LIT(buf), LIBR(xdg_home)(xdg), ".local", "state", NULL);
                 break;
             case XDG_CACHE:
-                l = path_join(LIT(buf), xdg_home(xdg), ".cache", NULL);
+                l = LIBR(path_join)(LIT(buf), LIBR(xdg_home)(xdg), ".cache", NULL);
                 break;
             case XDG_RUNTIME:
-                l = xdg_fallback_runtime_dir(LIT(buf));
+                l = LIBR(xdg_fallback_runtime_dir)(LIT(buf));
                 break;
             default:
                 failwith("unexpected kind: %d", k);
@@ -566,37 +596,37 @@ const char* xdg_dir(struct xdg* xdg, enum xdg_kind k)
     return xdg->dir[k];
 }
 
-const char* xdg_home(struct xdg* xdg)
+API const char* LIBR(xdg_home)(struct xdg* xdg)
 {
-    return xdg_dir(xdg, XDG_HOME);
+    return LIBR(xdg_dir)(xdg, XDG_HOME);
 }
 
-const char* xdg_data_home(struct xdg* xdg)
+API const char* LIBR(xdg_data_home)(struct xdg* xdg)
 {
-    return xdg_dir(xdg, XDG_DATA);
+    return LIBR(xdg_dir)(xdg, XDG_DATA);
 }
 
-const char* xdg_config_home(struct xdg* xdg)
+API const char* LIBR(xdg_config_home)(struct xdg* xdg)
 {
-    return xdg_dir(xdg, XDG_CONFIG);
+    return LIBR(xdg_dir)(xdg, XDG_CONFIG);
 }
 
-const char* xdg_state_home(struct xdg* xdg)
+API const char* LIBR(xdg_state_home)(struct xdg* xdg)
 {
-    return xdg_dir(xdg, XDG_STATE);
+    return LIBR(xdg_dir)(xdg, XDG_STATE);
 }
 
-const char* xdg_cache_home(struct xdg* xdg)
+API const char* LIBR(xdg_cache_home)(struct xdg* xdg)
 {
-    return xdg_dir(xdg, XDG_CACHE);
+    return LIBR(xdg_dir)(xdg, XDG_CACHE);
 }
 
-const char* xdg_runtime(struct xdg* xdg)
+API const char* LIBR(xdg_runtime)(struct xdg* xdg)
 {
-    return xdg_dir(xdg, XDG_RUNTIME);
+    return LIBR(xdg_dir)(xdg, XDG_RUNTIME);
 }
 
-const char** xdg_dirs(struct xdg* xdg, enum xdg_kind k)
+API const char** LIBR(xdg_dirs)(struct xdg* xdg, enum xdg_kind k)
 {
     if(xdg->dirs[k]) return (const char**)xdg->dirs[k];
 
@@ -627,7 +657,7 @@ const char** xdg_dirs(struct xdg* xdg, enum xdg_kind k)
 
     {
         dirs = alloca(sizeof(*dirs));
-        const char* h = xdg_dir(xdg, k);
+        const char* h = LIBR(xdg_dir)(xdg, k);
         dirs->len = strlen(h);
         dirs->path = alloca(dirs->len+1);
         memcpy(dirs->path, h, dirs->len+1);
@@ -647,7 +677,7 @@ const char** xdg_dirs(struct xdg* xdg, enum xdg_kind k)
             char* p = &buf[a];
             if(xdg_check_path(p)) {
                 char q[PATH_MAX];
-                size_t l = xdg_append_app(xdg, LIT(q), p);
+                size_t l = LIBR(xdg_append_app)(xdg, LIT(q), p);
                 if(l >= sizeof(q)) {
                     failwith("buffer overflow");
                 }
@@ -692,23 +722,23 @@ const char** xdg_dirs(struct xdg* xdg, enum xdg_kind k)
     return buf;
 }
 
-const char** xdg_data_dirs(struct xdg* xdg)
+API const char** LIBR(xdg_data_dirs)(struct xdg* xdg)
 {
-    return xdg_dirs(xdg, XDG_DATA);
+    return LIBR(xdg_dirs)(xdg, XDG_DATA);
 }
 
-const char** xdg_config_dirs(struct xdg* xdg)
+API const char** LIBR(xdg_config_dirs)(struct xdg* xdg)
 {
-    return xdg_dirs(xdg, XDG_CONFIG);
+    return LIBR(xdg_dirs)(xdg, XDG_CONFIG);
 }
 
-const char* xdg_resolvev(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps)
+API const char* LIBR(xdg_resolvev)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps)
 {
-    const char** dirs = xdg_dirs(xdg, k);
+    const char** dirs = LIBR(xdg_dirs)(xdg, k);
     for(size_t i = 0; dirs[i]; i++) {
         va_list qs;
         va_copy(qs, ps);
-        size_t l = path_joinv(buf, L, dirs[i], qs);
+        size_t l = LIBR(path_joinv)(buf, L, dirs[i], qs);
         if(l >= L) {
             failwith("buffer overflow");
         }
@@ -727,35 +757,35 @@ const char* xdg_resolvev(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, 
     return NULL;
 }
 
-const char* xdg_resolve(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...)
+API const char* LIBR(xdg_resolve)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...)
 {
     va_list ps; va_start(ps, L);
-    const char* p = xdg_resolvev(xdg, k, buf, L, ps);
+    const char* p = LIBR(xdg_resolvev)(xdg, k, buf, L, ps);
     return va_end(ps), p;
 }
 
-const char* xdg_resolvevs(struct xdg* xdg, enum xdg_kind k, va_list ps)
+API const char* LIBR(xdg_resolvevs)(struct xdg* xdg, enum xdg_kind k, va_list ps)
 {
     static char buf[PATH_MAX];
-    return xdg_resolvev(xdg, k, LIT(buf), ps);
+    return LIBR(xdg_resolvev)(xdg, k, LIT(buf), ps);
 }
 
-const char* xdg_resolves(struct xdg* xdg, enum xdg_kind k, ...)
+API const char* LIBR(xdg_resolves)(struct xdg* xdg, enum xdg_kind k, ...)
 {
     va_list ps; va_start(ps, k);
-    const char* p = xdg_resolvevs(xdg, k, ps);
+    const char* p = LIBR(xdg_resolvevs)(xdg, k, ps);
     return va_end(ps), p;
 }
 
-void xdg_makedirs(const char* path)
+API void LIBR(xdg_makedirs)(const char* path)
 {
-    int r = makedirs(path, 0700);
+    int r = LIBR(makedirs)(path, 0700);
     CHECK(r, "makedirs(%s, 0700)", path);
 }
 
-const char* xdg_preparev(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps)
+API const char* LIBR(xdg_preparev)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, va_list ps)
 {
-    size_t l = path_joinv(buf, L, xdg_dir(xdg, k), ps);
+    size_t l = LIBR(path_joinv)(buf, L, LIBR(xdg_dir)(xdg, k), ps);
     if(l >= L) {
         failwith("buffer overflow");
     }
@@ -765,7 +795,7 @@ const char* xdg_preparev(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, 
     if(r == -1 && errno == ENOENT) {
         char d[l+1];
         memcpy(d, buf, l+1);
-        xdg_makedirs(dirname(d));
+        LIBR(xdg_makedirs)(dirname(d));
         return buf;
     }
     CHECK(r, "stat(%s)", buf);
@@ -773,23 +803,23 @@ const char* xdg_preparev(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, 
     return buf;
 }
 
-const char* xdg_prepare(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...)
+API const char* LIBR(xdg_prepare)(struct xdg* xdg, enum xdg_kind k, char* buf, size_t L, ...)
 {
     va_list ps; va_start(ps, L);
-    const char* p = xdg_preparev(xdg, k, buf, L, ps);
+    const char* p = LIBR(xdg_preparev)(xdg, k, buf, L, ps);
     return va_end(ps), p;
 }
 
-const char* xdg_preparevs(struct xdg* xdg, enum xdg_kind k, va_list ps)
+API const char* LIBR(xdg_preparevs)(struct xdg* xdg, enum xdg_kind k, va_list ps)
 {
     static char buf[PATH_MAX];
-    return xdg_preparev(xdg, k, LIT(buf), ps);
+    return LIBR(xdg_preparev)(xdg, k, LIT(buf), ps);
 }
 
-const char* xdg_prepares(struct xdg* xdg, enum xdg_kind k, ...)
+API const char* LIBR(xdg_prepares)(struct xdg* xdg, enum xdg_kind k, ...)
 {
     va_list ps; va_start(ps, k);
-    const char* p = xdg_preparevs(xdg, k, ps);
+    const char* p = LIBR(xdg_preparevs)(xdg, k, ps);
     return va_end(ps), p;
 }
 
@@ -800,7 +830,7 @@ const char* xdg_prepares(struct xdg* xdg, enum xdg_kind k, ...)
 #include <sys/stat.h>
 #include <limits.h>
 
-size_t path_joinv(char* buf, size_t L, const char* p0, va_list ps)
+API size_t LIBR(path_joinv)(char* buf, size_t L, const char* p0, va_list ps)
 {
     size_t n = strlen(p0);
     if(n < L) {
@@ -830,18 +860,18 @@ size_t path_joinv(char* buf, size_t L, const char* p0, va_list ps)
     return n;
 }
 
-size_t path_join(char* buf, size_t L, const char* p0, ...)
+API size_t LIBR(path_join)(char* buf, size_t L, const char* p0, ...)
 {
     va_list ps; va_start(ps, p0);
-    size_t n = path_joinv(buf, L, p0, ps);
+    size_t n = LIBR(path_joinv)(buf, L, p0, ps);
     return va_end(ps), n;
 }
 
 #ifdef failwith
-const char* path_joinvs(const char* p0, va_list ps)
+API const char* LIBR(path_joinvs)(const char* p0, va_list ps)
 {
     static char buf[PATH_MAX];
-    size_t l = path_joinv(buf, sizeof(buf), p0, ps);
+    size_t l = LIBR(path_joinv)(buf, sizeof(buf), p0, ps);
     if(l >= sizeof(buf)) {
         failwith("buffer overflow");
     }
@@ -849,15 +879,15 @@ const char* path_joinvs(const char* p0, va_list ps)
     return buf;
 }
 
-const char* path_joins(const char* p0, ...)
+API const char* LIBR(path_joins)(const char* p0, ...)
 {
     va_list ps; va_start(ps, p0);
-    const char* p = path_joinvs(p0, ps);
+    const char* p = LIBR(path_joinvs)(p0, ps);
     return va_end(ps), p;
 }
 #endif
 
-int makedirs(const char* path, mode_t mode)
+API int LIBR(makedirs)(const char* path, mode_t mode)
 {
     const size_t L = strlen(path);
     char buf[L+1];
@@ -951,7 +981,7 @@ static uint32_t sha1_S(uint32_t X, int n)
     return (X << n) | (X >> (32-n));
 }
 
-void sha1_init(struct sha1_state* st_)
+API void LIBR(sha1_init)(struct sha1_state* st_)
 {
     struct sha1_state_internal* st = sha1_to_internal_state(st_);
 
@@ -994,11 +1024,11 @@ static void sha1_process_block(struct sha1_state_internal* st, uint32_t block[16
     st->H[4] += E;
 }
 
-void sha1_update(struct sha1_state* st_, void* buf, size_t len)
+API void LIBR(sha1_update)(struct sha1_state* st_, const void* buf, size_t len)
 {
     struct sha1_state_internal* st = sha1_to_internal_state(st_);
 
-    uint8_t* b = buf;
+    const uint8_t* b = buf;
     size_t l = len;
 
     while(l > 0) {
@@ -1018,7 +1048,7 @@ void sha1_update(struct sha1_state* st_, void* buf, size_t len)
     st->len += len;
 }
 
-void sha1_finalize(struct sha1_state* st_)
+API void LIBR(sha1_finalize)(struct sha1_state* st_)
 {
     struct sha1_state_internal* st = sha1_to_internal_state(st_);
 
@@ -1033,7 +1063,7 @@ void sha1_finalize(struct sha1_state* st_)
     *((uint64_t*)(&buf[l])) = htobe64(st->len*8);
     buf[0] |= 0x80;
 
-    sha1_update(st_, LIT(buf));
+    LIBR(sha1_update)(st_, LIT(buf));
 
     for(size_t i = 0; i < 5; i++) {
         st->H[i] = htobe32(st->H[i]);
@@ -1044,7 +1074,7 @@ void sha1_finalize(struct sha1_state* st_)
 
 #include <fcntl.h>
 
-void set_blocking(int fd, int blocking)
+API void LIBR(set_blocking)(int fd, int blocking)
 {
     int fl = fcntl(fd, F_GETFL, 0);
     if(blocking) {

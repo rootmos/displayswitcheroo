@@ -10,7 +10,7 @@
 
 // https://en.wikipedia.org/wiki/Extended_Display_Identification_Data#EDID_1.4_data_format
 
-void edid_parse(struct edid* edid, void* buf, size_t len)
+PRIVATE void edid_parse(struct edid* edid, void* buf, size_t len)
 {
     memset(edid, 0, sizeof(*edid));
 
@@ -53,7 +53,7 @@ void edid_parse(struct edid* edid, void* buf, size_t len)
     edid->version_minor = p[19];
 }
 
-int edid_push(lua_State* L, const struct edid* edid)
+PRIVATE int edid_push(lua_State* L, const struct edid* edid)
 {
     luaR_stack(L);
 
