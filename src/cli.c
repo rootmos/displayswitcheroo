@@ -143,6 +143,18 @@ static int add_xdg_to_search_paths(lua_State* L)
         failwith("buffer overflow");
     }
 
+    for(const char** p = xdg_dirs(xdg, XDG_CONFIG); *p != NULL; p++) {
+        l += snprintf(&path[l], sizeof(path) - l, ";%s/?.lua;%s/?/init.lua", *p, *p);
+        if(l >= sizeof(path)) {
+            failwith("pathfer overflow");
+        }
+
+        cl += snprintf(&cpath[cl], sizeof(cpath) - cl, ";%s/?.so", *p);
+        if(cl >= sizeof(cpath)) {
+            failwith("pathfer overflow");
+        }
+    }
+
     for(const char** p = xdg_dirs(xdg, XDG_DATA); *p != NULL; p++) {
         l += snprintf(&path[l], sizeof(path) - l, ";%s/?.lua;%s/?/init.lua", *p, *p);
         if(l >= sizeof(path)) {
