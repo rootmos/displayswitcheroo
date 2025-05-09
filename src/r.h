@@ -1,4 +1,4 @@
-// libr 0.5.0 (ec3c888754c9966a470ff5a8d1baf1cfaa3045d2) (https://github.com/rootmos/libr.git) (2023-12-04T13:27:09+01:00)
+// libr 0.5.1 (a4a5e5613ad474d064921267df16cfc6c57b2498) (https://github.com/rootmos/libr.git) (2025-05-09T08:27:59+02:00)
 // modules: logging now lua fail util xdg path sha1 nonblock
 
 #ifndef LIBR_HEADER
@@ -41,31 +41,31 @@ void LIBR(dummy)();
 #if LOG_LEVEL >= LOG_ERROR
 #define error(format, ...) __r_log(LOG_ERROR, format, ##__VA_ARGS__)
 #else
-#define error(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
+#define error(format, ...) do { if(0) LIBR(dummy)(); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_WARNING
 #define warning(format, ...) __r_log(LOG_WARNING, format, ##__VA_ARGS__)
 #else
-#define warning(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
+#define warning(format, ...) do { if(0) LIBR(dummy)(); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_INFO
 #define info(format, ...) __r_log(LOG_INFO, format, ##__VA_ARGS__)
 #else
-#define info(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
+#define info(format, ...) do { if(0) LIBR(dummy)(); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_DEBUG
 #define debug(format, ...) __r_log(LOG_DEBUG, format, ##__VA_ARGS__)
 #else
-#define debug(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
+#define debug(format, ...) do { if(0) LIBR(dummy)(); } while(0)
 #endif
 
 #if LOG_LEVEL >= LOG_TRACE
 #define trace(format, ...) __r_log(LOG_TRACE, format, ##__VA_ARGS__)
 #else
-#define trace(format, ...) do { if(0) LIBR(dummy)(__VA_ARGS__); } while(0)
+#define trace(format, ...) do { if(0) LIBR(dummy)(); } while(0)
 #endif
 
 void LIBR(logger)(
@@ -173,7 +173,7 @@ void LIBR(luaR_checkmetatable)(lua_State* L, int arg, const char* tname);
     LIBR(failwith0)(__extension__ __FUNCTION__, __extension__ __FILE__, \
         __extension__ __LINE__, 0, format "\n", ##__VA_ARGS__)
 
-#define not_implemented() LIBR(failwith0)("not implemented")
+#define not_implemented() do { failwith("not implemented"); } while(0)
 
 void LIBR(failwith0)(
     const char* const caller,
